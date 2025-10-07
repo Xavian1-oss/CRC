@@ -31,7 +31,7 @@ PATCH_LEN=16
 INVERSE=''
 
 # ===== 想批量跑的组合 =====
-DATASETS=(Weather) # 如果要测试不同数据集的话，在括号里添加即可
+DATASETS=(Electricity) # 如果要测试不同数据集的话，在括号里添加即可
 PRED_LENS=(96 192 336) # 如果要测试不同步长的话，在括号里添加即可
 
 # ===== 各数据集路径与通道数（按你的目录改）=====
@@ -43,8 +43,9 @@ dataset_setup () {
       ETTm1) ROOT="./dataset/ETT-small/"; CSV="ETTm1.csv"; ENC_IN=7; DEC_IN=7; C_OUT=7;;
       ETTm2) ROOT="./dataset/ETT-small/"; CSV="ETTm2.csv"; ENC_IN=7; DEC_IN=7; C_OUT=7;;
       Weather)     ROOT="./dataset/weather/";       CSV="weather.csv";          ENC_IN=21;  DEC_IN=21;  C_OUT=21;;
-      # Electricity) ROOT="./dataset/electricity/";   CSV="electricity.csv";      ENC_IN=321; DEC_IN=321; C_OUT=321;;
-      # Exchange)    ROOT="./dataset/exchange_rate/"; CSV="exchange_rate.csv";    ENC_IN=8;   DEC_IN=8;   C_OUT=8;;
+      Traffic)     ROOT="./dataset/traffic/";       CSV="traffic.csv";          ENC_IN=862; DEC_IN=862; C_OUT=862;; 
+      Electricity) ROOT="./dataset/electricity/";   CSV="electricity.csv";      ENC_IN=321; DEC_IN=321; C_OUT=321;;
+      Exchange)    ROOT="./dataset/exchange_rate/"; CSV="exchange_rate.csv";    ENC_IN=8;   DEC_IN=8;   C_OUT=8;;
       # ILI)         ROOT="./dataset/ili/";           CSV="national_illness.csv"; ENC_IN=7;   DEC_IN=7;   C_OUT=7;;
       *) echo "未知数据集: $ds"; exit 1;;
     esac
@@ -69,7 +70,7 @@ run_with_log () {
 
     # 判断数据集是否为自定义类型
     local data_arg="${ds}"
-    if [[ "${ds}" == "Weather" ]]; then
+    if [[ "${ds}" == "Weather" || "${ds}" == "Traffic" || "${ds}" == "Exchange" || "${ds}" == "Electricity" ]]; then
         data_arg="custom"
     fi
 
