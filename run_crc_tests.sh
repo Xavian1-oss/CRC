@@ -31,8 +31,8 @@ PATCH_LEN=16
 INVERSE=''
 
 # ===== 想批量跑的组合 =====
-DATASETS=(Electricity) # 如果要测试不同数据集的话，在括号里添加即可
-PRED_LENS=(96 192 336) # 如果要测试不同步长的话，在括号里添加即可
+DATASETS=(Weather) # 如果要测试不同数据集的话，在括号里添加即可
+PRED_LENS=(96) # 如果要测试不同步长的话，在括号里添加即可
 
 # ===== 各数据集路径与通道数（按你的目录改）=====
 dataset_setup () {
@@ -171,11 +171,11 @@ EOF
 for ds in "${DATASETS[@]}"; do
   for pl in "${PRED_LENS[@]}"; do
     run_with_log TimeXer "${ds}" "${pl}"
-    run_with_log TimesNet "${ds}" "${pl}"
-    run_with_log Autoformer "${ds}" "${pl}"
-    run_with_log Informer  "${ds}" "${pl}"
-    run_with_log PatchTST  "${ds}" "${pl}"
-    run_with_log DLinear   "${ds}" "${pl}"
+    # run_with_log TimesNet "${ds}" "${pl}"
+    # run_with_log Autoformer "${ds}" "${pl}"
+    # run_with_log Informer  "${ds}" "${pl}"
+    # run_with_log PatchTST  "${ds}" "${pl}"
+    # run_with_log DLinear   "${ds}" "${pl}"
   done
 done
 
