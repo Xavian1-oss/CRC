@@ -13,8 +13,86 @@ from data_provider.data_factory import data_provider
 from utils.metrics import metric
 from utils.dtw_metric import accelerated_dtw
 from utils.tools import visual
+import matplotlib.pyplot as plt
+import networkx as nx
+from scipy.stats import spearmanr 
+
 
 warnings.filterwarnings('ignore')
+
+# === 时间因果：TCL 第一层权重可视化（热力图 + 平均重要性曲线） ===
+def visualize_time_causality_matrix(stcl_core, save_dir=None, tag="val"):
+    W = stcl_core.b[0].l.weight.detach().cpu().numpy()  # (d, P)
+    Wn = W / (np.abs(W).max() + 1e-8)
+
+    plt.figure(figsize=(9, 3))
+    plt.imshow(Wn, cmap='RdBu_r', aspect='auto', vmin=-1, vmax=1)
+    plt.colorbar(label='Normalized weight')
+    plt.xlabel('Historical step (0..P-1)'); plt.ylabel('Hidden unit')
+    plt.title('Time Causality Matrix (TCL layer-1)')
+    plt.tight_layout()
+    if save_dir: plt.savefig(os.path.join(save_dir, f"time_causality_{tag}.png"), dpi=200)
+    plt.close()
+
+    imp = np.abs(W).mean(axis=0); imp /= (imp.max() + 1e-8)
+    plt.figure(figsize=(8, 2.6))
+    plt.plot(imp, '-o', ms=3); plt.grid(True, alpha=0.3)
+    plt.xlabel('Historical step'); plt.ylabel('Normalized importance')
+    plt.title('Temporal Importance Curve')
+    plt.tight_layout()
+    if save_dir: plt.savefig(os.path.join(save_dir, f"time_importance_{tag}.png"), dpi=200)
+    plt.close()
+
+
+# === 空间因果：把 S 画成有向图（S[i,j] ≈ j→i 强度；只画 |S|>thr 的边） ===
+def visualize_spatial_causal_graph(S, node_names=None, thr=0.0, save_dir=None, tag="val"):
+    N = S.shape[0]
+    if node_names is None:
+        node_names = [f"N{i}" for i in range(N)]
+    G = nx.DiGraph()
+    for i in range(N):
+        G.add_node(node_names[i])
+    for i in range(N):
+        for j in range(N):
+            if i==j: continue
+            w = float(S[i,j])
+            if abs(w) > thr:
+                G.add_edge(node_names[j], node_names[i], weight=w)  # j→i
+
+    pos = nx.spring_layout(G, seed=42)
+    widths = [max(0.6, 4*abs(G[u][v]['weight'])) for u,v in G.edges()]
+    plt.figure(figsize=(7,7))
+    nx.draw(G, pos, with_labels=True, node_color='lightblue', node_size=1200,
+            arrows=True, width=widths, arrowstyle='-|>', arrowsize=16)
+    plt.title("Spatial Causal Graph (edge: j→i, width∝|strength|)")
+    plt.tight_layout()
+    if save_dir: plt.savefig(os.path.join(save_dir, f"spatial_causal_graph_{tag}.png"), dpi=200)
+    plt.close()
+
+
+# === 先验一致性与滞后一致性的一些指标（简版） ===
+def precision_at_k_vs_prior(S, A_prior, k_ratio=0.1):
+    N = S.shape[0]; M = N*(N-1); k = max(1, int(k_ratio*M))
+    mask = ~np.eye(N, dtype=bool)
+    scores = np.abs(S[mask]).flatten()
+    prior  = A_prior[mask].flatten().astype(np.int32)
+    top_idx = np.argsort(-scores)[:k]
+    return float(prior[top_idx].mean())
+
+def spearman_vs_prior(S, A_prior):
+    mask = ~np.eye(S.shape[0], dtype=bool)
+    s = np.abs(S[mask]).flatten()
+    p = A_prior[mask].flatten()
+    rho = spearmanr(s, p).correlation
+    return float(rho) if rho==rho else 0.0
+
+def quick_val_series_from_windows(W_val):
+    """
+    用滑窗近似拼一条每节点的验证序列（简易、稳妥、不依赖 dataset 内部）。
+    思路：取每个窗口的“最后一个时间点”拼接成长度 B 的序列。
+    返回 arr:(B,N)
+    """
+    return W_val[:, -1, :]  # (B, N)，每行看作一个连续采样点的“快照”
 
 
 class Exp_CRC(Exp_Long_Term_Forecast):
@@ -132,6 +210,12 @@ class Exp_CRC(Exp_Long_Term_Forecast):
             # 其他超参：mask_ratio=0.15, lr=1e-3, wd=1e-4, ...
         )
 
+        # >>>>>>>>>>>>> INSERT HERE: 时间因果可视化（基于 encoder.core 第一层） <<<<<<<<<<<<<
+        viz_dir = os.path.join('./results', setting, 'viz_train')
+        os.makedirs(viz_dir, exist_ok=True)
+        print("[Viz] 绘制时间因果热力图/曲线 ...")
+        visualize_time_causality_matrix(pre_encoder.encoder.core, save_dir=viz_dir, tag="after_stageA")
+
         # 3) Stage B：Hybrid 纠偏（多尺度先验）
         print("\n--- Stage B: Hybrid Corrector (multi-scale priors) ---")
         # 仅用训练集生成先验统计（mu/sd）
@@ -163,6 +247,54 @@ class Exp_CRC(Exp_Long_Term_Forecast):
         # 保护性断言（避免通道数不一致）
         assert N_out == yhat_tr_bl.shape[-1], "HybridTrainer.N must equal number of target channels"
         self.hybrid_corrector.train(W_tr, y_tr_win, yhat_tr_bl, W_vl, y_vl_win, yhat_vl_bl)
+
+        # >>>>>>>>>>>>> INSERT HERE: 空间因果矩阵 S（基于验证集窗口）& 可视化 <<<<<<<<<<<<<
+        print("[Viz] 估计空间因果矩阵 S (j→i) 并可视化 ...")
+        S_val = pre_encoder.encoder.estimate_spatial_causality_matrix(W_vl, batch_size=256)  # (N,N)
+        np.save(os.path.join(viz_dir, 'S_val.npy'), S_val)
+        visualize_spatial_causal_graph(S_val, node_names=[f"N{i}" for i in range(S_val.shape[0])],
+                                       thr=0.0, save_dir=viz_dir, tag="val")
+
+        # >>>>>>>>>>>>> INSERT HERE: 与先验的一致性（避免“自我检查”，只是报告用） <<<<<<<<<<<<<
+        print("[Check] 先验一致性指标（与 A_corr 对比，仅做报告，不作为“真值”）")
+        prec10 = precision_at_k_vs_prior(S_val, A_prior=A, k_ratio=0.10)
+        rho_sp = spearman_vs_prior(S_val, A_prior=A)
+        print(f"Precision@10% (S vs A_corr): {prec10:.3f}")
+        print(f"Spearman (|S| vs A_corr): {rho_sp:.3f}")
+
+        # >>>>>>>>>>>>> INSERT HERE: 滞后一致性（O vs |C|），先用快照序列做近似 <<<<<<<<<<<<<
+        print("[Check] 滞后一致性（occlusion vs cross-corr）...")
+        # 选几条最强边（按 |S| 排序），以免全量太慢
+        N = S_val.shape[0]
+        cand = [(i,j,abs(S_val[i,j])) for i in range(N) for j in range(N) if i!=j and S_val[i,j]!=0]
+        cand.sort(key=lambda x: -x[2])
+        top_pairs = cand[: min(len(cand), 8)]  # 例如取前 8 条
+
+        # 快照近似的连续序列 (B,N)
+        snap = quick_val_series_from_windows(W_vl)
+        # 简易标准化
+        snap = (snap - snap.mean(axis=0, keepdims=True)) / (snap.std(axis=0, keepdims=True) + 1e-8)
+
+        for (i,j,_) in top_pairs:
+            # 1) Occlusion：对 j→i 扫描滞后
+            lags, O = pre_encoder.encoder.occlusion_curve_a21(W_vl, i=i, j=j, max_lag=min(12, W_vl.shape[1]//2), win=2, mode='mean')
+            # 2) Cross-corr：用快照近似的连续序列计算 |C|
+            xi = snap[:, i]; xj = snap[:, j]
+            # 只取正滞后：corr( xi[t], xj[t-L] )
+            Lmax = min(12, len(xi)//4)
+            C = []
+            Ls = list(range(1, Lmax+1))
+            for L in Ls:
+                xi_cut = xi[L:]; xj_cut = xj[:-L]
+                C.append( (xi_cut * xj_cut).sum() / (np.sqrt((xi_cut**2).sum()) * np.sqrt((xj_cut**2).sum()) + 1e-8) )
+            C = np.asarray(C, dtype=np.float32)
+
+            # 3) 指标
+            O_n = O[:len(Ls)] / (O[:len(Ls)].max() + 1e-8)
+            C_n = np.abs(C) / (np.abs(C).max() + 1e-8)
+            rho = spearmanr(O_n, C_n).correlation
+            l_occ = int(Ls[int(np.argmax(O_n))]); l_xc = int(Ls[int(np.argmax(C_n))])
+            print(f"  pair j→i = {j}→{i} | Δlag={abs(l_occ-l_xc)}, ρ={0.0 if rho!=rho else rho:.2f} (Lmax={Lmax})")
 
         print("\n>>>>>>> CRC 训练流程全部完成 <<<<<<<")
         return self.hybrid_corrector

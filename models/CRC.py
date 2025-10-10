@@ -6,6 +6,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import matplotlib.pyplot as plt
+import networkx as nx
+from scipy.stats import spearmanr
 from copy import deepcopy
 
 # =========================
@@ -161,6 +164,11 @@ class STCL_Core(nn.Module):
             Rq = blk(r_in); Aq = self.m(Rq.view(B,-1)).view(B,2,2)
             R_layers.append(Aq @ Rq * self.g[q]); A_a += self.g[q]*Aq; r_in = Rq
         return {"R_layers": R_layers, "A_agg": A_a}
+    def time_causality_weight(self) -> torch.Tensor:
+        """
+        返回 TCL 第一层线性层的权重 (d, P)，用于时间因果可视化。
+        """
+        return self.b[0].l.weight  # shape: (d, P)
 
 class TorchCausalStateEncoder(nn.Module):
     def __init__(self, A, P, d, Q, temp: float = 3.0, self_gate: float = 0.3):
@@ -186,6 +194,69 @@ class TorchCausalStateEncoder(nn.Module):
             a21=torch.tanh(self.temp*A_agg[:,1,0]).unsqueeze(1)
             causal[:,i,:]+=a21*Rj
         return causal / (self.deg+self.self_gate).view(1,-1,1)
+    # 新增
+    @torch.no_grad()
+    def estimate_spatial_causality_matrix(self, W: np.ndarray, batch_size: int = 256) -> np.ndarray:
+        """
+        基于验证集窗口 W:(B,P,N)，估计 j→i 的平均因果强度矩阵 S:(N,N)。
+        只在 self.edges（候选边）上估计，其他置 0。
+        """
+        device = next(self.parameters()).device
+        Wt = torch.from_numpy(W).to(device)  # (B,P,N)
+        N = W.shape[2]
+        S = np.zeros((N, N), dtype=np.float32)
+        batches = [Wt[k:k+batch_size] for k in range(0, Wt.shape[0], batch_size)]
+
+        for (i, j) in self.edges:           # 注意：你定义的是 (i,j) 表示 j 影响 i
+            vals = []
+            for b in batches:
+                pair = torch.stack([b[:, :, i], b[:, :, j]], dim=-1)  # (b,P,2)
+                out = self.core(pair)                                 # {"R_layers":[...], "A_agg": (b,2,2)}
+                A_agg = out["A_agg"]
+                a21 = torch.tanh(self.temp * A_agg[:, 1, 0])          # j → i
+                vals.append(a21.detach().cpu())
+            S[i, j] = torch.cat(vals, dim=0).mean().item()
+        return S  # 非候选边为 0
+    
+    @torch.no_grad()
+    def occlusion_curve_a21(self, W: np.ndarray, i: int, j: int,
+                            max_lag: int = 12, win: int = 1, mode: str = 'mean') -> Tuple[np.ndarray, np.ndarray]:
+        """
+        对 j→i 做滞后遮挡，返回 O(ℓ) 曲线（以 a21 下降为指标）
+        """
+        device = next(self.parameters()).device
+        Wt = torch.from_numpy(W).to(device)  # (B,P,N)
+
+        # baseline
+        pair0 = torch.stack([Wt[:, :, i], Wt[:, :, j]], dim=-1)
+        out0 = self.core(pair0)
+        a0 = torch.tanh(self.temp * out0["A_agg"][:, 1, 0]).mean().item()
+
+        B, P, _ = W.shape
+        lags = np.arange(1, max_lag + 1)
+        drops = []
+
+        for L in lags:
+            Wm = Wt.clone()
+            a = max(P - L - win + 1, 0)
+            b = max(P - L + 1, 1)
+            if mode == 'zero':
+                Wm[:, a:b, j] = 0.0
+            elif mode == 'mean':
+                seg_mean = Wm[:, :, j].mean()
+                Wm[:, a:b, j] = seg_mean
+            elif mode == 'shuffle':
+                idx = torch.randperm(b - a, device=device)
+                Wm[:, a:b, j] = Wm[:, a:b, j][:, idx]
+            else:
+                raise ValueError("mode must be in {'zero','mean','shuffle'}")
+
+            pair = torch.stack([Wm[:, :, i], Wm[:, :, j]], dim=-1)
+            out = self.core(pair)
+            a1 = torch.tanh(self.temp * out["A_agg"][:, 1, 0]).mean().item()
+            drops.append(max(0.0, a0 - a1))
+
+        return lags, np.asarray(drops, dtype=np.float32)
 
 class PretrainableEncoderMTL(nn.Module):
     def __init__(self, A: np.ndarray, P: int, H: int, N: int, d_model: int = 64, Q: int = 2, recon_hidden: int = 64):
