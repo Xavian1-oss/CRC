@@ -377,23 +377,23 @@ class Exp_CRC(Exp_Long_Term_Forecast):
         print(f"MSE 相对提升率: {mse_improve:.2f}%")
         print("=" * 50)
 
-        # ---------- 可视化（可选） ----------
-        folder_path = './test_results/' + setting + '/'
-        os.makedirs(folder_path, exist_ok=True)
-        print("生成可视化图片...")
-        for i in range(min(W_te.shape[0], 100)):
-            if i % 20 == 0:
-                # 仍沿用“最后一列”的可视化习惯；如需严格按目标列索引，按需替换这里的 -1
-                gt = np.concatenate((W_te[i, :, -1], y_te[i, :, -1]), axis=0)
-                pd = np.concatenate((W_te[i, :, -1], yfinal_te[i, :, -1]), axis=0)
-                visual(gt, pd, os.path.join(folder_path, f'{i}.pdf'))
-        print(f"图片保存在: {folder_path}")
+        # # ---------- 可视化（可选） ----------
+        # folder_path = './test_results/' + setting + '/'
+        # os.makedirs(folder_path, exist_ok=True)
+        # print("生成可视化图片...")
+        # for i in range(min(W_te.shape[0], 100)):
+        #     if i % 20 == 0:
+        #         # 仍沿用“最后一列”的可视化习惯；如需严格按目标列索引，按需替换这里的 -1
+        #         gt = np.concatenate((W_te[i, :, -1], y_te[i, :, -1]), axis=0)
+        #         pd = np.concatenate((W_te[i, :, -1], yfinal_te[i, :, -1]), axis=0)
+        #         visual(gt, pd, os.path.join(folder_path, f'{i}.pdf'))
+        # print(f"图片保存在: {folder_path}")
 
-        # ---------- 保存结果 ----------
-        folder_path = './results/' + setting + '/'
-        os.makedirs(folder_path, exist_ok=True)
-        np.save(folder_path + 'metrics.npy', np.array([final_mae, final_mse]))
-        np.save(folder_path + 'pred.npy', yfinal_te)
-        np.save(folder_path + 'true.npy', y_te)
-        np.save(folder_path + 'pred_baseline.npy', yhat_te_bl)
-        return
+        # # ---------- 保存结果 ----------
+        # folder_path = './results/' + setting + '/'
+        # os.makedirs(folder_path, exist_ok=True)
+        # np.save(folder_path + 'metrics.npy', np.array([final_mae, final_mse]))
+        # np.save(folder_path + 'pred.npy', yfinal_te)
+        # np.save(folder_path + 'true.npy', y_te)
+        # np.save(folder_path + 'pred_baseline.npy', yhat_te_bl)
+        # return

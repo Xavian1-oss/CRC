@@ -11,6 +11,7 @@ import networkx as nx
 from scipy.stats import spearmanr
 from copy import deepcopy
 
+
 # =========================
 # Helpers
 # =========================
@@ -171,63 +172,111 @@ class STCL_Core(nn.Module):
         return self.b[0].l.weight  # shape: (d, P)
 
 class TorchCausalStateEncoder(nn.Module):
+    """
+    Corrected and optimized version of TorchCausalStateEncoder.
+    - Parallelized forward pass and explainability methods.
+    - Corrected aggregation logic in the forward pass.
+    """
     def __init__(self, A, P, d, Q, temp: float = 3.0, self_gate: float = 0.3):
         super().__init__()
         self.register_buffer('A', torch.from_numpy(A.astype(np.float32)))
-        self.d = d; self.core = STCL_Core(P, d, Q)
+        self.d = d
+        self.core = STCL_Core(P, d, Q)
         self.temp, self.self_gate = float(temp), float(self_gate)
-        self.edges=[(i,j) for i,row in enumerate(A) for j,val in enumerate(row) if val==1 and i!=j]
-        deg=A.sum(axis=1).astype(np.float32)
-        self.register_buffer('deg', torch.from_numpy(np.maximum(deg,1e-6)))
+
+        edges = np.array([(j, i) for i, row in enumerate(A) for j, val in enumerate(row) if val == 1 and i != j], dtype=np.int64).T
+        if edges.size == 0:
+            self.register_buffer('edge_index', torch.empty((2, 0), dtype=torch.long))
+        else:
+            self.register_buffer('edge_index', torch.from_numpy(edges))
+
+        deg = A.sum(axis=1).astype(np.float32)
+        self.register_buffer('deg', torch.from_numpy(np.maximum(deg, 1e-6)))
+
     def forward(self, Wb):
-        B,P,N=Wb.shape; causal=Wb.new_zeros(B,N,self.d)
-        for i in range(N):
-            pair=torch.stack([Wb[:,:,i],Wb[:,:,i]],dim=-1); out=self.core(pair)
-            R_last, A_agg=out['R_layers'][-1], out['A_agg']
-            Ri=F.normalize(R_last[:,0,:],dim=1)
-            a_self=torch.tanh(self.temp*A_agg[:,1,0]).unsqueeze(1)
-            causal[:,i,:]+=self.self_gate*a_self*Ri
-        for (i,j) in self.edges:
-            pair=torch.stack([Wb[:,:,i],Wb[:,:,j]],dim=-1); out=self.core(pair)
-            R_last, A_agg=out['R_layers'][-1], out['A_agg']
-            Rj=F.normalize(R_last[:,1,:],dim=1)
-            a21=torch.tanh(self.temp*A_agg[:,1,0]).unsqueeze(1)
-            causal[:,i,:]+=a21*Rj
-        return causal / (self.deg+self.self_gate).view(1,-1,1)
-    # 新增
+        B, P, N = Wb.shape
+        
+        # 1. Process self-dynamics (parallel)
+        self_pairs = Wb.unsqueeze(-1).repeat(1, 1, 1, 2)
+        self_pairs_batched = self_pairs.permute(0, 2, 1, 3).reshape(B * N, P, 2)
+        
+        out_self = self.core(self_pairs_batched)
+        R_last_self, A_agg_self = out_self['R_layers'][-1], out_self['A_agg']
+        
+        Ri = F.normalize(R_last_self[:, 0, :], dim=1)
+        a_self = torch.tanh(self.temp * A_agg_self[:, 1, 0]).unsqueeze(1)
+        
+        causal = (self.self_gate * a_self * Ri).view(B, N, self.d)
+
+        if self.edge_index.shape[1] == 0:
+            return causal / (self.deg + self.self_gate).view(1, -1, 1)
+
+        # 2. Process cross-node dynamics (parallel)
+        source_nodes_idx, target_nodes_idx = self.edge_index[0], self.edge_index[1]
+        
+        Wb_j = Wb[:, :, source_nodes_idx]
+        Wb_i = Wb[:, :, target_nodes_idx]
+        
+        edge_pairs = torch.stack([Wb_i, Wb_j], dim=-1)
+        edge_pairs_batched = edge_pairs.permute(0, 2, 1, 3).reshape(B * self.edge_index.shape[1], P, 2)
+        
+        out_edge = self.core(edge_pairs_batched)
+        R_last_edge, A_agg_edge = out_edge['R_layers'][-1], out_edge['A_agg']
+
+        Rj = F.normalize(R_last_edge[:, 1, :], dim=1)
+        a21 = torch.tanh(self.temp * A_agg_edge[:, 1, 0]).unsqueeze(1)
+
+        messages = (a21 * Rj).view(B, self.edge_index.shape[1], self.d)
+        
+        # --- Scatter / Aggregate (Corrected) ---
+        causal_cross = torch.zeros_like(causal)
+        for b_idx in range(B):
+            causal_cross[b_idx].index_add_(0, target_nodes_idx, messages[b_idx])
+        
+        causal = causal + causal_cross
+
+        return causal / (self.deg + self.self_gate).view(1, -1, 1)
+
     @torch.no_grad()
     def estimate_spatial_causality_matrix(self, W: np.ndarray, batch_size: int = 256) -> np.ndarray:
-        """
-        基于验证集窗口 W:(B,P,N)，估计 j→i 的平均因果强度矩阵 S:(N,N)。
-        只在 self.edges（候选边）上估计，其他置 0。
-        """
+        self.eval()
         device = next(self.parameters()).device
-        Wt = torch.from_numpy(W).to(device)  # (B,P,N)
         N = W.shape[2]
         S = np.zeros((N, N), dtype=np.float32)
-        batches = [Wt[k:k+batch_size] for k in range(0, Wt.shape[0], batch_size)]
 
-        for (i, j) in self.edges:           # 注意：你定义的是 (i,j) 表示 j 影响 i
-            vals = []
-            for b in batches:
-                pair = torch.stack([b[:, :, i], b[:, :, j]], dim=-1)  # (b,P,2)
-                out = self.core(pair)                                 # {"R_layers":[...], "A_agg": (b,2,2)}
-                A_agg = out["A_agg"]
-                a21 = torch.tanh(self.temp * A_agg[:, 1, 0])          # j → i
-                vals.append(a21.detach().cpu())
-            S[i, j] = torch.cat(vals, dim=0).mean().item()
-        return S  # 非候选边为 0
-    
+        if self.edge_index.shape[1] == 0:
+            return S
+        
+        source_nodes_idx, target_nodes_idx = self.edge_index[0].cpu().numpy(), self.edge_index[1].cpu().numpy()
+        all_strengths = []
+
+        for k in range(0, W.shape[0], batch_size):
+            Wb = torch.from_numpy(W[k:k+batch_size]).to(device)
+            B = Wb.shape[0]
+
+            Wb_j = Wb[:, :, source_nodes_idx]
+            Wb_i = Wb[:, :, target_nodes_idx]
+        
+            edge_pairs = torch.stack([Wb_i, Wb_j], dim=-1)
+            edge_pairs_batched = edge_pairs.permute(0, 2, 1, 3).reshape(B * self.edge_index.shape[1], -1, 2)
+            
+            out_edge = self.core(edge_pairs_batched)
+            A_agg_edge = out_edge['A_agg']
+            
+            a21 = torch.tanh(self.temp * A_agg_edge[:, 1, 0])
+            all_strengths.append(a21.view(B, -1).detach().cpu())
+
+        avg_strengths = torch.cat(all_strengths, dim=0).mean(dim=0).numpy()
+        S[target_nodes_idx, source_nodes_idx] = avg_strengths
+        return S
+
     @torch.no_grad()
     def occlusion_curve_a21(self, W: np.ndarray, i: int, j: int,
                             max_lag: int = 12, win: int = 1, mode: str = 'mean') -> Tuple[np.ndarray, np.ndarray]:
-        """
-        对 j→i 做滞后遮挡，返回 O(ℓ) 曲线（以 a21 下降为指标）
-        """
+        self.eval()
         device = next(self.parameters()).device
-        Wt = torch.from_numpy(W).to(device)  # (B,P,N)
+        Wt = torch.from_numpy(W).to(device)
 
-        # baseline
         pair0 = torch.stack([Wt[:, :, i], Wt[:, :, j]], dim=-1)
         out0 = self.core(pair0)
         a0 = torch.tanh(self.temp * out0["A_agg"][:, 1, 0]).mean().item()
@@ -243,11 +292,11 @@ class TorchCausalStateEncoder(nn.Module):
             if mode == 'zero':
                 Wm[:, a:b, j] = 0.0
             elif mode == 'mean':
-                seg_mean = Wm[:, :, j].mean()
+                seg_mean = Wt[:, :, j].mean()
                 Wm[:, a:b, j] = seg_mean
             elif mode == 'shuffle':
                 idx = torch.randperm(b - a, device=device)
-                Wm[:, a:b, j] = Wm[:, a:b, j][:, idx]
+                Wm[:, a:b, j] = Wm[:, a_idx:b, j]
             else:
                 raise ValueError("mode must be in {'zero','mean','shuffle'}")
 
@@ -282,19 +331,29 @@ class PretrainableEncoderMTL(nn.Module):
         r_p = self.head_r(causal).permute(0,2,1)
         return (y_p, dy_p, r_p, recon_pred, target_recon)
 
+
 def mtl_pretrain_trainer(model: PretrainableEncoderMTL,
                          W_tr, y_tr, W_vl, y_vl, yhat_tr_bl, yhat_vl_bl,
                          mask_ratio=0.15, lr=1e-3, wd=1e-4, max_epochs=80, patience=10, batch_size=64):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"MTL pretrainer using device: {device}")
     model.to(device); opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)
+    
+    # 训练集 DataLoader (这部分不变)
     R_tr = y_tr - yhat_tr_bl
     tr_ds = torch.utils.data.TensorDataset(*(torch.from_numpy(d) for d in [W_tr, y_tr, R_tr]))
     tr_dl = torch.utils.data.DataLoader(tr_ds, batch_size=batch_size, shuffle=True)
-    Wvl_t, yvl_t = torch.from_numpy(W_vl).to(device), torch.from_numpy(y_vl).to(device)
+    
+    # ==================== 修改点 1: 创建验证集 DataLoader ====================
+    # 注意：验证时 shuffle=False，batch_size 可以适当增大以加快速度
+    val_ds = torch.utils.data.TensorDataset(torch.from_numpy(W_vl), torch.from_numpy(y_vl))
+    val_dl = torch.utils.data.DataLoader(val_ds, batch_size=batch_size * 2, shuffle=False)
+    # =========================================================================
+
     best_mae, bad, best_state = float("inf"), 0, None
     for epoch in range(1, max_epochs+1):
         model.train(); total_loss = 0.0
+        # 训练循环 (这部分不变)
         for wb, yb, Rb in tr_dl:
             wb, yb, Rb = wb.to(device), yb.to(device), Rb.to(device)
             opt.zero_grad()
@@ -314,18 +373,32 @@ def mtl_pretrain_trainer(model: PretrainableEncoderMTL,
             )
             loss.backward(); torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0); opt.step()
             total_loss += float(loss.item())
+
+        # ==================== 修改点 2: 分批进行验证 ====================
         model.eval()
+        total_val_error = 0.0
         with torch.no_grad():
-            yv_p, _, _, _, _ = model(Wvl_t, mask_ratio=0.0)
-            mae_v_y = F.l1_loss(yv_p, yvl_t).item()
+            for Wb_v, yb_v in val_dl: # <-- 使用 val_dl 进行循环
+                Wb_v, yb_v = Wb_v.to(device), yb_v.to(device)
+                yv_p, _, _, _, _ = model(Wb_v, mask_ratio=0.0) # <-- 一次只处理一个批次
+                
+                # 使用 reduction='sum' 累加每个批次的误差总和，以确保计算准确
+                total_val_error += F.l1_loss(yv_p, yb_v, reduction='sum').item()
+
+        # 计算整个验证集的平均 MAE
+        mae_v_y = total_val_error / len(val_ds)
+        # =============================================================
+            
         print(f"MTL Epoch {epoch:03d}: TrainLoss={total_loss/len(tr_dl):.4f} | Val MAE(y)={mae_v_y:.4f}")
+        
+        # Early stopping 逻辑 (这部分不变)
         if mae_v_y < best_mae:
             best_mae, bad, best_state = mae_v_y, 0, deepcopy(model.state_dict())
         else:
             bad += 1
             if bad >= patience: print(f"Early stopping at epoch {epoch}."); break
+            
     if best_state: model.load_state_dict(best_state)
-
 
 # =========================
 # Hybrid Corrector (ridge + shared MLP + tau + blending)
@@ -416,43 +489,55 @@ class HybridTrainer:
                             r_delta, torch.zeros_like(r_delta))
         return torch.clamp(gated, -tau, tau)
 
-    # ---- training ----
     def train(self, W_tr, y_tr, yhat_tr, W_vl, y_vl, yhat_vl):
-        print("[HybridTrainer] Encoding features...")
-        # 1) train-time priors statistics
-        F_tr_tmp, F_mu, F_sd, _ = build_physics_priors_ms(
+        # 1) 仅使用训练数据计算和设置先验统计量 (mu/sd)
+        # 这一步是后续特征标准化的基础，必须首先进行。
+        _, F_mu, F_sd, _ = build_physics_priors_ms(
             W_tr, self.A, scales=self.scales, freq_bands=self.freq_bands,
             use_robust=self.use_robust, top_m=self.top_m, R_train=(y_tr - yhat_tr),
             mu=None, sd=None
         )
         self.F_mu, self.F_sd = F_mu.astype(np.float32), F_sd.astype(np.float32)
 
-        # 2) encode augmented features
-        Z_tr_aug = self._encode_aug(W_tr); Z_vl_aug = self._encode_aug(W_vl)
-        d_aug = Z_tr_aug.shape[2]; self._init_shared(d_aug=d_aug, node_emb_dim=self.node_emb.embedding_dim)
+        # ==================== 优化核心：特征预计算与缓存 ====================
+        # 在这里一次性计算好训练集和验证集的所有增强特征，避免后续重复计算。
+        print("[HybridTrainer] Pre-calculating and caching all augmented features for train and validation sets...")
+        Z_tr_aug = self._encode_aug(W_tr)
+        Z_vl_aug = self._encode_aug(W_vl)
+        print(f"[HybridTrainer] Feature encoding complete. Train features shape: {Z_tr_aug.shape}, Val features shape: {Z_vl_aug.shape}")
+        # ==================================================================
 
-        # 3) linear ridge floor
+        # 2) 初始化共享MLP的维度
+        d_aug = Z_tr_aug.shape[2]
+        self._init_shared(d_aug=d_aug, node_emb_dim=self.node_emb.embedding_dim)
+
+        # 3) 训练线性基底 (Ridge Regression Floor)
+        # 直接使用已经缓存的 Z_tr_aug 和 Z_vl_aug
         R_tr = y_tr - yhat_tr
         val_mae_lin, W_list = ridge_probe_val(Z_tr_aug, R_tr, Z_vl_aug, yhat_vl, y_vl, l2=1e-2)
         self.W_list_t = [torch.from_numpy(w.astype(np.float32)).to(self.device) for w in W_list]
         print(f"[Hybrid] Linear-only Val MAE = {val_mae_lin:.4f}")
 
-        # 4) tau from validation residual quantile (per (h,i))
+        # 4) 计算安全边界 tau
+        # 将缓存的 Z_vl_aug 转换为 tensor
         Zvl_t = torch.from_numpy(Z_vl_aug).to(self.device)
         yvl_t = torch.from_numpy(y_vl).to(self.device)
         yhvl_t = torch.from_numpy(yhat_vl).to(self.device)
         with torch.no_grad():
             r_lin_v = self._r_linear(Zvl_t)
-            abs_res = torch.abs(yvl_t - (yhvl_t + r_lin_v))  # (B,H,N)
-        tau_np = np.quantile(abs_res.cpu().numpy(), self.quantile_q, axis=0)  # (H,N)
+            abs_res = torch.abs(yvl_t - (yhvl_t + r_lin_v))
+        tau_np = np.quantile(abs_res.cpu().numpy(), self.quantile_q, axis=0)
         self.tau_map = torch.from_numpy(tau_np.astype(np.float32)).to(self.device)
 
-        # 5) train shared MLP (with gate + clamp + L2 on delta)
+        # 5) 训练共享的非线性修正 MLP
+        # 直接使用缓存的 Z_tr_aug 创建数据加载器
         tr_ds = torch.utils.data.TensorDataset(*(torch.from_numpy(d) for d in [Z_tr_aug, y_tr, yhat_tr]))
         tr_dl = torch.utils.data.DataLoader(tr_ds, batch_size=self.batch_size, shuffle=True)
+        
         opt = torch.optim.Adam(self.shared_mlp.parameters(), lr=self.lr, weight_decay=self.wd)
         best_mae, best_state, bad_epochs = val_mae_lin, deepcopy(self.shared_mlp.state_dict()), 0
         self.linear_is_best = torch.ones(self.N, self.H, dtype=torch.bool, device=self.device)
+
         for ep in range(1, self.max_epochs + 1):
             self.shared_mlp.train()
             for Zb, yb, yh_b in tr_dl:
@@ -460,13 +545,13 @@ class HybridTrainer:
                 opt.zero_grad()
                 r_lin = self._r_linear(Zb.detach())
                 r_delta = self._r_delta(Zb)
-                tau = self.tau_map.unsqueeze(0).expand_as(r_delta)   # (1,H,N)->(B,H,N)
+                tau = self.tau_map.unsqueeze(0).expand_as(r_delta)
                 r_delta_c = self._apply_dir_gate(r_delta, yb, yh_b, r_lin, tau)
                 y_f = yh_b.detach() + r_lin + r_delta_c
                 loss = F.l1_loss(y_f, yb) + self.l2_delta * (r_delta_c**2).mean()
                 loss.backward(); opt.step()
 
-            # validate (per (h,i) choose better)
+            # 在验证集上进行评估 (直接使用已经创建的 Zvl_t)
             self.shared_mlp.eval()
             with torch.no_grad():
                 r_lin_v = self._r_linear(Zvl_t)
@@ -475,21 +560,23 @@ class HybridTrainer:
                 r_delta_v = torch.clamp(r_delta_v, -tau_v, tau_v)
                 y_lin = yhvl_t + r_lin_v
                 y_hyb = y_lin + r_delta_v
-                err_lin = torch.mean(torch.abs(yvl_t - y_lin), dim=0)   # (H,N)
-                err_hyb = torch.mean(torch.abs(yvl_t - y_hyb), dim=0)   # (H,N)
+                err_lin = torch.mean(torch.abs(yvl_t - y_lin), dim=0)
+                err_hyb = torch.mean(torch.abs(yvl_t - y_hyb), dim=0)
                 better_hyb = (err_hyb + 1e-8) < (err_lin * (1 - self.improve_eps))
-                self.linear_is_best = (~better_hyb).permute(1,0).contiguous()  # (N,H)
+                self.linear_is_best = (~better_hyb).permute(1,0).contiguous()
                 mae_v_mix = torch.mean(torch.where(better_hyb, err_hyb, err_lin)).item()
             print(f"[Hybrid] Epoch {ep:03d}: Val MAE (mixed)={mae_v_mix:.4f}")
+
             if mae_v_mix < best_mae:
                 best_mae, best_state, bad_epochs = mae_v_mix, deepcopy(self.shared_mlp.state_dict()), 0
             else:
                 bad_epochs += 1
                 if bad_epochs >= self.patience:
                     print(f"Early stopping at epoch {ep}."); break
+        
         if best_state: self.shared_mlp.load_state_dict(best_state)
 
-        # 6) per-(node,h) blending weights grid search (shrink-to-base)
+        # 6) 进行融合权重校准 (直接使用已经创建的 Zvl_t)
         print("[Hybrid] Calibrating per-(node,h) blending weights ...")
         with torch.no_grad():
             r_lin_v = self._r_linear(Zvl_t)
@@ -499,7 +586,8 @@ class HybridTrainer:
             base = yhvl_t; y_true = yvl_t
             W_grid = [0.0, 0.25, 0.5, 0.75, 1.0]
             self.W_blend = torch.zeros(self.N, self.H, 2, device=self.device)
-            base_mae_map = torch.mean(torch.abs(y_true - base), dim=0)  # (H,N)
+            base_mae_map = torch.mean(torch.abs(y_true - base), dim=0)
+            
             for i in range(self.N):
                 for h in range(self.H):
                     best_mae_ih = base_mae_map[h,i].item(); best_w = (0.0, 0.0)
@@ -508,7 +596,6 @@ class HybridTrainer:
                             y_hat = base[:,h,i] + w1 * r_lin_v[:,h,i] + w2 * r_delta_v[:,h,i]
                             m = torch.mean(torch.abs(y_true[:,h,i] - y_hat)).item()
                             if m < best_mae_ih - 1e-12: best_mae_ih, best_w = m, (w1, w2)
-                    # shrink-to-base if improvement not significant
                     if best_mae_ih > base_mae_map[h,i].item() * (1 - self.improve_eps):
                         best_w = (0.0, 0.0)
                     self.W_blend[i,h,0], self.W_blend[i,h,1] = best_w[0], best_w[1]

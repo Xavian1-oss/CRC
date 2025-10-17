@@ -13,7 +13,7 @@ C_OUT=7
 
 EPOCHS=50
 PATIENCE=7
-BATCH=32
+BATCH=8
 LR=1e-3
 
 Q_VAL=3
@@ -31,8 +31,8 @@ PATCH_LEN=16
 INVERSE=''
 
 # ===== 想批量跑的组合 =====
-DATASETS=(Weather) # 如果要测试不同数据集的话，在括号里添加即可
-PRED_LENS=(96) # 如果要测试不同步长的话，在括号里添加即可
+DATASETS=(Traffic) # 如果要测试不同数据集的话，在括号里添加即可
+PRED_LENS=(192) # 如果要测试不同步长的话，在括号里添加即可
 
 # ===== 各数据集路径与通道数（按你的目录改）=====
 dataset_setup () {
@@ -170,11 +170,11 @@ EOF
 # ===== 批量：数据集 × 预测步 × 基线 =====
 for ds in "${DATASETS[@]}"; do
   for pl in "${PRED_LENS[@]}"; do
-    run_with_log TimeXer "${ds}" "${pl}"
+    # run_with_log TimeXer "${ds}" "${pl}"
     # run_with_log TimesNet "${ds}" "${pl}"
     # run_with_log Autoformer "${ds}" "${pl}"
     # run_with_log Informer  "${ds}" "${pl}"
-    # run_with_log PatchTST  "${ds}" "${pl}"
+    run_with_log PatchTST  "${ds}" "${pl}"
     # run_with_log DLinear   "${ds}" "${pl}"
   done
 done

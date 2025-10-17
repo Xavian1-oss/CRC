@@ -1,0 +1,3 @@
+﻿dataset,model,horizon,baseline_mse,baseline_mae,corrected_mse,corrected_mae,filename
+Traffic,dlinear,96,0.6487,0.3962,0.5396,0.338,Traffic_crc_dlinear_m_pl96_dm64.log
+Traffic,dlinear,192,0.5983,0.3705,0.5322,0.334,Traffic_crc_dlinear_m_pl192_dm64.log

@@ -1,0 +1,2 @@
+﻿dataset,model,horizon,baseline_mse,baseline_mae,corrected_mse,corrected_mae,filename
+Traffic,patchtst,192,0.4594,0.2962,0.4491,0.2865,Traffic_crc_patchtst_m_pl192_dm64.log

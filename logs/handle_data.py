@@ -125,7 +125,7 @@ def process_log_directory(root_directory):
 # --- 使用示例 ---
 
 # !! 重要：请将这里的路径替换成你自己的文件夹路径 !!
-log_directory_path = 'logs/multi_20251005_135004'
+log_directory_path = 'logs/multi_20251016_105904'
 
 # 运行主处理函数
 process_log_directory(log_directory_path)
