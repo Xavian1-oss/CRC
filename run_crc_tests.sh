@@ -1,40 +1,34 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ================== 基础设置（全局缺省；可被后续覆盖） ==================
+# ================== 基础设置 ==================
 export CUDA_VISIBLE_DEVICES=0
 
-SEQ_LEN=96
-LABEL_LEN=48
+# --- 以下参数由 GDEF 字典统一管理，此处仅为备注 ---
+# SEQ_LEN=96
+# LABEL_LEN=48
+# EPOCHS=50
+# PATIENCE=7
+# BATCH=32
+# LR=1e-3
+# DMODEL=64
+# NHEADS=8
+# ELAYERS=2
+# DLAYERS=1
+# DFF=2048
+# PATCH_LEN=16
+# FACTOR=1
+# MOVING_AVG=25
 
-ENC_IN=7
-DEC_IN=7
-C_OUT=7
-
-EPOCHS=50
-PATIENCE=7
-BATCH=32
-LR=1e-3
-
-Q_VAL=3
-TOP_K=5
-
-DMODEL=64
-NHEADS=8
-ELAYERS=2
-DLAYERS=1
-DFF=2048
-PATCH_LEN=16
-FACTOR=1
-MOVING_AVG=25
-
+# --- 以下参数为 GDEF 之外的全局设置 ---
 # USE_DTW=--use_dtw
+Q_VAL=3
 INVERSE=''   # 若要还原尺度评估，设为 '--inverse'
 
 # ================== 想批量跑的组合 ==================
-DATASETS=(ETTh1 ETTh2 ETTm1 ETTm2)            # 例如：ETTh1 ETTh2 ETTm1 ETTm2 Weather Electricity Exchange Traffic
-PRED_LENS=(96 192 336 720)               # 例如：96 192 336 720
-BASELINES=(PatchTST)          # 例如：PatchTST TimesNet DLinear Informer Autoformer
+DATASETS=(ETTh1 ETTh2 ETTm1 ETTm2)
+PRED_LENS=(96 192 336 720) # 注意：你之前的脚本只运行到336，现在加回了720
+BASELINES=(TimeXer TimesNet PatchTST DLinear)
 
 # ================== 数据集路径与通道数 ==================
 dataset_setup () {
@@ -53,112 +47,145 @@ dataset_setup () {
 }
 
 # ================== 三层默认 + 查表覆盖 ==================
-# 0) 全局缺省
+# 0) 全局缺省 (与 run.py 的 argparse default 保持一致)
 declare -A GDEF=(
   [LR]="1e-4" [BATCH]="32" [PATIENCE]="3"
   [DMODEL]="512" [NHEADS]="8" [ELAYERS]="2" [DLAYERS]="1" [DFF]="2048"
   [PATCH_LEN]="16" [FACTOR]="1" [TOP_K]="5" [MOVING_AVG]="25"
+  [SEQ_LEN]="96"
+  [LABEL_LEN]="48"
+  [EPOCHS]="50"
+  [DROPOUT]="0.1"
+  [LRADJ]="type1"
+  [USE_AMP]=""
 )
 
 # 1) baseline × dataset 覆盖（只写与全局不同的）
 declare -A BD
-
+# ... (你之前添加的所有 BD[...] 定义保持不变) ...
 BD["PatchTST|ETTh1|ELAYERS"]="1"
 BD["PatchTST|ETTh1|DLAYERS"]="1"
 BD["PatchTST|ETTh1|FACTOR"]="3"
-
 BD["PatchTST|ETTh2|ELAYERS"]="3"
 BD["PatchTST|ETTh2|DLAYERS"]="1"
 BD["PatchTST|ETTh2|FACTOR"]="3"
 BD["PatchTST|ETTh2|NHEADS"]="4"
-
 BD["PatchTST|ETTm1|DLAYERS"]="1"
 BD["PatchTST|ETTm1|FACTOR"]="3"
-
 BD["PatchTST|ETTm2|DLAYERS"]="1"
 BD["PatchTST|ETTm2|FACTOR"]="3"
-
 BD["DLinear|ETTh1|ELAYERS"]="2"
 BD["DLinear|ETTh1|DLAYERS"]="1"
 BD["DLinear|ETTh1|FACTOR"]="3"
-
 BD["TimeXer|ETTh1|FACTOR"]="3"
-
 BD["TimeXer|ETTh2|FACTOR"]="3"
 BD["TimeXer|ETTh2|DFF"]="1024"
+BD["TimeXer|ETTm1|ELAYERS"]="1"
+BD["TimeXer|ETTm1|FACTOR"]="3"
+BD["TimeXer|ETTm1|DMODEL"]="256"
+BD["TimeXer|ETTm1|BATCH"]="4"
+BD["TimeXer|ETTm2|ELAYERS"]="1"
+BD["TimeXer|ETTm2|FACTOR"]="3"
+BD["TimesNet|ETTh1|ELAYERS"]="2"
+BD["TimesNet|ETTh1|DLAYERS"]="1"
+BD["TimesNet|ETTh1|FACTOR"]="3"
+BD["TimesNet|ETTh1|DMODEL"]="16"
+BD["TimesNet|ETTh1|DFF"]="32"
+BD["TimesNet|ETTh1|TOP_K"]="5"
+BD["TimesNet|ETTh2|ELAYERS"]="2"
+BD["TimesNet|ETTh2|DLAYERS"]="1"
+BD["TimesNet|ETTh2|FACTOR"]="3"
+BD["TimesNet|ETTh2|DMODEL"]="32"
+BD["TimesNet|ETTh2|DFF"]="32"
+BD["TimesNet|ETTh2|TOP_K"]="5"
+BD["TimesNet|ETTm1|FACTOR"]="3"
+BD["TimesNet|ETTm2|FACTOR"]="3"
+
 
 # 2) baseline × dataset × horizon 覆盖（只写确实因 horizon 不同而变化的项）
 declare -A BDH
-
+# ... (你之前添加的所有 BDH[...] 定义保持不变) ...
 BDH["PatchTST|ETTh1|96|NHEADS"]="2"
 BDH["PatchTST|ETTh1|192|NHEADS"]="8"
 BDH["PatchTST|ETTh1|336|NHEADS"]="8"
 BDH["PatchTST|ETTh1|720|NHEADS"]="16"
-
 BDH["PatchTST|ETTm1|96|ELAYERS"]="1"
 BDH["PatchTST|ETTm1|96|NHEADS"]="2"
 BDH["PatchTST|ETTm1|96|BATCH"]="32"
-
 BDH["PatchTST|ETTm1|192|ELAYERS"]="3"
 BDH["PatchTST|ETTm1|192|NHEADS"]="2"
 BDH["PatchTST|ETTm1|192|BATCH"]="128"
-
 BDH["PatchTST|ETTm1|336|ELAYERS"]="1"
 BDH["PatchTST|ETTm1|336|NHEADS"]="4"
 BDH["PatchTST|ETTm1|336|BATCH"]="128"
-
 BDH["PatchTST|ETTm1|720|ELAYERS"]="3"
 BDH["PatchTST|ETTm1|720|NHEADS"]="4"
 BDH["PatchTST|ETTm1|720|BATCH"]="128"
-
 BDH["PatchTST|ETTm2|96|ELAYERS"]="3"
 BDH["PatchTST|ETTm2|96|NHEADS"]="16"
 BDH["PatchTST|ETTm2|96|BATCH"]="32"
-
 BDH["PatchTST|ETTm2|192|ELAYERS"]="3"
 BDH["PatchTST|ETTm2|192|NHEADS"]="2"
 BDH["PatchTST|ETTm2|192|BATCH"]="128"
-
 BDH["PatchTST|ETTm2|336|ELAYERS"]="1"
 BDH["PatchTST|ETTm2|336|NHEADS"]="4"
 BDH["PatchTST|ETTm2|336|BATCH"]="32"
-
 BDH["PatchTST|ETTm2|720|ELAYERS"]="3"
 BDH["PatchTST|ETTm2|720|NHEADS"]="4"
 BDH["PatchTST|ETTm2|720|BATCH"]="128"
-
 BDH["TimeXer|ETTh1|96|ELAYERS"]="1"
 BDH["TimeXer|ETTh1|96|DMODEL"]="256"
 BDH["TimeXer|ETTh1|96|BATCH"]="4"
-
 BDH["TimeXer|ETTh1|192|ELAYERS"]="2"
 BDH["TimeXer|ETTh1|192|DMODEL"]="128"
 BDH["TimeXer|ETTh1|192|BATCH"]="4"
-
 BDH["TimeXer|ETTh1|336|ELAYERS"]="1"
 BDH["TimeXer|ETTh1|336|DMODEL"]="512"
 BDH["TimeXer|ETTh1|336|DFF"]="1024"
 BDH["TimeXer|ETTh1|336|BATCH"]="16"
-
 BDH["TimeXer|ETTh1|720|ELAYERS"]="1"
 BDH["TimeXer|ETTh1|720|DMODEL"]="256"
 BDH["TimeXer|ETTh1|720|DFF"]="1024"
 BDH["TimeXer|ETTh1|720|BATCH"]="16"
-
 BDH["TimeXer|ETTh2|96|ELAYERS"]="1"
 BDH["TimeXer|ETTh2|96|DMODEL"]="256"
 BDH["TimeXer|ETTh2|96|BATCH"]="16"
-
 BDH["TimeXer|ETTh2|192|ELAYERS"]="1"
 BDH["TimeXer|ETTh2|192|DMODEL"]="256"
-
 BDH["TimeXer|ETTh2|336|ELAYERS"]="2"
 BDH["TimeXer|ETTh2|336|DMODEL"]="512"
 BDH["TimeXer|ETTh2|336|BATCH"]="4"
-
 BDH["TimeXer|ETTh2|720|ELAYERS"]="2"
 BDH["TimeXer|ETTh2|720|DMODEL"]="256"
 BDH["TimeXer|ETTh2|720|BATCH"]="16"
+BDH["TimeXer|ETTm1|192|DFF"]="256"
+BDH["TimeXer|ETTm1|336|DFF"]="1024"
+BDH["TimeXer|ETTm1|720|DFF"]="512"
+BDH["TimeXer|ETTm2|96|DMODEL"]="256"
+BDH["TimeXer|ETTm2|192|DMODEL"]="256"
+BDH["TimeXer|ETTm2|192|DFF"]="1024"
+BDH["TimeXer|ETTm2|192|BATCH"]="16"
+BDH["TimeXer|ETTm2|336|DFF"]="1024"
+BDH["TimesNet|ETTm1|96|DMODEL"]="64"
+BDH["TimesNet|ETTm1|96|DFF"]="64"
+BDH["TimesNet|ETTm1|192|DMODEL"]="64"
+BDH["TimesNet|ETTm1|192|DFF"]="64"
+BDH["TimesNet|ETTm1|336|DMODEL"]="16"
+BDH["TimesNet|ETTm1|336|DFF"]="32"
+BDH["TimesNet|ETTm1|336|EPOCHS"]="3"
+BDH["TimesNet|ETTm1|720|DMODEL"]="16"
+BDH["TimesNet|ETTm1|720|DFF"]="32"
+BDH["TimesNet|ETTm2|96|DMODEL"]="32"
+BDH["TimesNet|ETTm2|96|DFF"]="32"
+BDH["TimesNet|ETTm2|192|DMODEL"]="32"
+BDH["TimesNet|ETTm2|192|DFF"]="32"
+BDH["TimesNet|ETTm2|192|EPOCHS"]="1"
+BDH["TimesNet|ETTm2|336|DMODEL"]="32"
+BDH["TimesNet|ETTm2|336|DFF"]="32"
+BDH["TimesNet|ETTm2|720|DMODEL"]="16"
+BDH["TimesNet|ETTm2|720|DFF"]="32"
+BDH["TimesNet|ETTm2|720|EPOCHS"]="1"
+
 
 # 3) 查表函数：horizon 覆盖 > (baseline,dataset) 覆盖 > 全局缺省
 getp () {
@@ -191,7 +218,7 @@ run_with_log () {
     data_arg="custom"
   fi
 
-  # —— 取这次要用的超参（查表合并） ——
+  # —— 取这次要用的超参（查表合并） —— (已升级，包含所有 GDEF 参数)
   local LRv       ; LRv=$(getp "$baseline" "$ds" "$pred" "LR")
   local BATCHv    ; BATCHv=$(getp "$baseline" "$ds" "$pred" "BATCH")
   local PATIENCEv ; PATIENCEv=$(getp "$baseline" "$ds" "$pred" "PATIENCE")
@@ -204,13 +231,19 @@ run_with_log () {
   local FACTORv   ; FACTORv=$(getp "$baseline" "$ds" "$pred" "FACTOR")
   local TOP_Kv    ; TOP_Kv=$(getp "$baseline" "$ds" "$pred" "TOP_K")
   local MOVAVGv   ; MOVAVGv=$(getp "$baseline" "$ds" "$pred" "MOVING_AVG")
+  local SEQLENv   ; SEQLENv=$(getp "$baseline" "$ds" "$pred" "SEQ_LEN")
+  local LABELLENv ; LABELLENv=$(getp "$baseline" "$ds" "$pred" "LABEL_LEN")
+  local EPOCHSv   ; EPOCHSv=$(getp "$baseline" "$ds" "$pred" "EPOCHS")
+  local DROPOUTv  ; DROPOUTv=$(getp "$baseline" "$ds" "$pred" "DROPOUT")
+  local LRADJv    ; LRADJv=$(getp "$baseline" "$ds" "$pred" "LRADJ")
+  local USEAMPv   ; USEAMPv=$(getp "$baseline" "$ds" "$pred" "USE_AMP")
 
   local tag="${ds}_crc_${baseline,,}_pl${pred}_dm${DMODELv}"
   local log_file="${LOG_DIR}/${tag}.log"
 
   log "▶️  baseline=${baseline} / ds=${ds} / pred=${pred} (log: ${log_file})"
 
-  # ------- 回显命令 -------
+  # ------- 回显命令 ------- (已修正，使用 ...v 变量)
   {
     echo "CMD @ $(date +'%F %T')"
     cat <<EOF
@@ -224,8 +257,8 @@ python -u run.py \
   --root_path ${ROOT} \
   --data_path ${CSV} \
   --features M \
-  --seq_len ${SEQ_LEN} \
-  --label_len ${LABEL_LEN} \
+  --seq_len ${SEQLENv} \
+  --label_len ${LABELLENv} \
   --pred_len ${pred} \
   --enc_in ${ENC_IN} \
   --dec_in ${DEC_IN} \
@@ -241,18 +274,21 @@ python -u run.py \
   --moving_avg ${MOVAVGv} \
   --batch_size ${BATCHv} \
   --learning_rate ${LRv} \
-  --train_epochs ${EPOCHS} \
+  --train_epochs ${EPOCHSv} \
   --patience ${PATIENCEv} \
+  --dropout ${DROPOUTv} \
+  --lradj ${LRADJv} \
   --use_gpu True \
   --gpu_type cuda \
   --gpu 0 \
   ${USE_DTW:-} ${INVERSE} \
+  ${USEAMPv} \
   --q_val ${Q_VAL} \
   --des CRC_${baseline}_M_d${DMODELv}
 EOF
   } | tee -a "${log_file}" >> "${MASTER_LOG}"
 
-  # ------- 真正执行 -------
+  # ------- 真正执行 ------- (已修正，使用 ...v 变量)
   set +e
   python -u run.py \
     --task_name long_term_forecast \
@@ -264,8 +300,8 @@ EOF
     --root_path "${ROOT}" \
     --data_path "${CSV}" \
     --features M \
-    --seq_len "${SEQ_LEN}" \
-    --label_len "${LABEL_LEN}" \
+    --seq_len "${SEQLENv}" \
+    --label_len "${LABELLENv}" \
     --pred_len "${pred}" \
     --enc_in "${ENC_IN}" \
     --dec_in "${DEC_IN}" \
@@ -281,12 +317,15 @@ EOF
     --moving_avg "${MOVAVGv}" \
     --batch_size "${BATCHv}" \
     --learning_rate "${LRv}" \
-    --train_epochs "${EPOCHS}" \
+    --train_epochs "${EPOCHSv}" \
     --patience "${PATIENCEv}" \
+    --dropout "${DROPOUTv}" \
+    --lradj "${LRADJv}" \
     --use_gpu True \
     --gpu_type cuda \
     --gpu 0 \
     ${USE_DTW:-} ${INVERSE} \
+    ${USEAMPv} \
     --q_val "${Q_VAL}" \
     --des "CRC_${baseline}_M_d${DMODELv}" \
     2> >(tee -a "${log_file}" >> "${MASTER_LOG}" >&2) \

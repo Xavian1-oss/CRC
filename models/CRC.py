@@ -58,89 +58,142 @@ def build_physics_priors_ms(
     mu: Optional[np.ndarray] = None,
     sd: Optional[np.ndarray] = None
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[str]]:
-    """Return F_norm:(B,N,F), mu:(1,1,F), sd:(1,1,F), feat_names."""
-    B, P, N = W.shape; At = A.T.astype(np.float32)
-    feats, names = [], []
+    """
+    构建多尺度物理先验特征，并进行邻居聚合与标准化。
+    返回:
+      F_norm: (B,N,F)  标准化后的特征
+      mu:     (1,1,F)  标准化用中心（robust: median；否则 mean）
+      sd:     (1,1,F)  标准化用尺度（robust: MAD；否则 std）
+      names:  List[str] 特征名列表（顺序与 F_norm 的最后一维一致）
+    变更点（FIX）:
+      - 使用行归一化后的 A 进行邻居聚合，缓解度数偏置。
+      - 改良 ACF 归一化口径，使分母与分子长度一致，稳定性更好。
+    """
+    assert W.ndim == 3, "W must be (B,P,N)"
+    B, P, N = W.shape
+    A = A.astype(np.float32)
+    feats: List[np.ndarray] = []
+    names: List[str] = []
 
-    def _ema_last_window(x, s):
-        alpha = 2.0 / (s + 1.0); xk = x[:, -min(s, P):, :]
+    # ---------- helpers ----------
+    def _ema_last_window(x: np.ndarray, s: int) -> np.ndarray:
+        """对最后 s 步做 EMA，返回 (B,N)"""
+        alpha = 2.0 / (s + 1.0)
+        xk = x[:, -min(s, P):, :]  # (B, s_eff, N)
         ema = np.zeros((B, N), dtype=np.float32)
         for t in range(xk.shape[1]):
             ema = xk[:, t, :] if t == 0 else alpha * xk[:, t, :] + (1 - alpha) * ema
         return ema.astype(np.float32)
 
-    def _acf_lag(xs, lag):
-        if xs.shape[1] <= lag: return np.zeros((xs.shape[0], xs.shape[2]), dtype=np.float32)
-        x = xs - xs.mean(axis=1, keepdims=True)
-        num = (x[:, lag:, :] * x[:, :-lag, :]).sum(axis=1)
-        den = (x * x).sum(axis=1) + 1e-8
-        return (num / den).astype(np.float32)
+    def _acf_lag(xs: np.ndarray, lag: int) -> np.ndarray:
+        """
+        改良版 ACF：分母按对应长度对齐，避免不同长度带来的偏差。
+        xs: (B, L, N)
+        返回: (B, N)
+        """
+        if xs.shape[1] <= lag:
+            return np.zeros((xs.shape[0], xs.shape[2]), dtype=np.float32)
+        x = xs - xs.mean(axis=1, keepdims=True)        # (B, L, N)
+        num = (x[:, lag:, :] * x[:, :-lag, :]).sum(axis=1)            # (B, N)
+        d1 = np.sqrt((x[:, lag:, :] ** 2).sum(axis=1))                 # (B, N)
+        d2 = np.sqrt((x[:, :-lag, :] ** 2).sum(axis=1))                # (B, N)
+        return (num / (d1 * d2 + 1e-8)).astype(np.float32)
 
-    def _fft_bands(xs, bands):
-        Bz, sz, Nz = xs.shape; win = np.hanning(sz).astype(np.float32)[None, :, None]
-        xw = xs * win; spec = np.fft.rfft(xw, axis=1)
-        power = (spec.real**2 + spec.imag**2) / max(sz, 1)
-        freqs = np.fft.rfftfreq(sz, d=1.0)
+    def _fft_bands(xs: np.ndarray, bands: List[Tuple[float, float]]) -> np.ndarray:
+        """
+        对每个节点在窗口内做 Hann 加窗 + rFFT，按频段累加功率
+        xs: (B, L, N)
+        返回: (B, N, #bands)
+        """
+        Bz, Lz, Nz = xs.shape
+        if Lz <= 0:
+            return np.zeros((Bz, Nz, len(bands)), dtype=np.float32)
+        win = np.hanning(Lz).astype(np.float32)[None, :, None]   # (1,L,1)
+        xw = xs * win
+        spec = np.fft.rfft(xw, axis=1)
+        power = (spec.real**2 + spec.imag**2) / max(Lz, 1)
+        freqs = np.fft.rfftfreq(Lz, d=1.0)
         out = []
         for lo, hi in bands:
             mask = (freqs >= lo) & (freqs < hi)
-            out.append(power[:, mask, :].sum(axis=1).astype(np.float32) if np.any(mask)
-                        else np.zeros((Bz, Nz), dtype=np.float32))
+            if np.any(mask):
+                out.append(power[:, mask, :].sum(axis=1).astype(np.float32))
+            else:
+                out.append(np.zeros((Bz, Nz), dtype=np.float32))
         return np.stack(out, axis=-1)  # (B,N,#bands)
 
-    last = W[:, -1, :]; prev = W[:, -2, :] if P >= 2 else W[:, -1, :]
+    # ---------- 单点统计 ----------
+    last = W[:, -1, :]                                 # (B,N)
+    prev = W[:, -2, :] if P >= 2 else W[:, -1, :]
     feats += [last, last - prev, last * prev, last**2]
     names += ["last", "diff1", "prod12", "last_sq"]
 
+    # ---------- 多尺度统计 ----------
     for s in scales:
-        s_eff = min(s, P); recent = W[:, -s_eff:, :]
+        s_eff = min(s, P)
+        recent = W[:, -s_eff:, :]                      # (B,s_eff,N)
         feats.append(recent.mean(axis=1)); names.append(f"mean_s{s}")
         feats.append(_ema_last_window(W, s_eff)); names.append(f"ema_s{s}")
         feats.append(recent.var(axis=1)); names.append(f"var_s{s}")
         q75 = np.quantile(recent, 0.75, axis=1).astype(np.float32)
         q25 = np.quantile(recent, 0.25, axis=1).astype(np.float32)
-        feats.append((q75 - q25)); names.append(f"iqr_s{s}")
+        feats.append(q75 - q25); names.append(f"iqr_s{s}")
         feats.append(np.abs(np.diff(recent, axis=1)).sum(axis=1)); names.append(f"absdiff_energy_s{s}")
         feats.append(_acf_lag(recent, 1)); names.append(f"acf1_s{s}")
         feats.append(_acf_lag(recent, max(2, s_eff // 2))); names.append(f"acf_half_s{s}")
-        pb = _fft_bands(recent, freq_bands)  # (B,N,Band)
+        pb = _fft_bands(recent, freq_bands)            # (B,N,#bands)
         for bi in range(pb.shape[-1]):
             feats.append(pb[..., bi]); names.append(f"pband{bi}_s{s}")
 
-    F0 = np.stack(feats, axis=-1).astype(np.float32)  # (B,N,F0)
+    # 聚合前的基础特征
+    F0 = np.stack(feats, axis=-1).astype(np.float32)   # (B,N,F0)
+    Bz, Nz, Fz = F0.shape
 
-    # Graph aggregation (A^T)
-    Bz, Nz, Fz = F0.shape; Fg = np.empty_like(F0)
-    for k in range(Fz): Fg[:, :, k] = F0[:, :, k] @ At  # (B,N)
+    # ---------- FIX: 图行归一化，缓解度偏置 ----------
+    deg = A.sum(axis=1, keepdims=True).astype(np.float32)
+    deg = np.clip(deg, 1.0, None)                      # 防止除零
+    An = (A / deg).astype(np.float32)                  # 行归一化 A
+    At = An.T                                          # 用 An 的转置做邻居聚合
 
-    # Optional feature selection by residual correlation (per node)
+    # 邻居聚合 (按列: 对每个特征维做一次 (B,N) @ (N,N))
+    Fg = np.empty_like(F0, dtype=np.float32)
+    for k in range(Fz):
+        Fg[:, :, k] = F0[:, :, k] @ At                 # (B,N)
+
+    # ---------- 可选: 按残差相关性进行特征选择 ----------
     if (top_m is not None) and (R_train is not None):
-        Rm = np.mean(np.abs(R_train), axis=1)  # (B,N)
-        F_sel = np.zeros_like(Fg)
+        # R_train: (B,H,N) -> 聚合为 (B,N)，采用 |R| 的时间平均
+        Rm = np.mean(np.abs(R_train), axis=1)          # (B,N)
+        F_sel = np.zeros_like(Fg, dtype=np.float32)
         for i in range(N):
-            Fi = Fg[:, i, :]; ri = Rm[:, i]
-            Fi_c = Fi - Fi.mean(axis=0, keepdims=True); ri_c = ri - ri.mean()
-            num = (Fi_c * ri_c[:, None]).sum(axis=0)
-            den = (Fi_c**2).sum(axis=0)**0.5 * ((ri_c**2).sum()**0.5 + 1e-8)
-            corr = num / (den + 1e-8)
+            Fi = Fg[:, i, :]                           # (B,Fz)
+            ri = Rm[:, i]                              # (B,)
+            # 去中心化
+            Fi_c = Fi - Fi.mean(axis=0, keepdims=True)
+            ri_c = ri - ri.mean()
+            num = (Fi_c * ri_c[:, None]).sum(axis=0)                   # (Fz,)
+            den = np.sqrt((Fi_c**2).sum(axis=0)) * (np.sqrt((ri_c**2).sum()) + 1e-8)
+            corr = num / (den + 1e-8)                                   # (Fz,)
             top_idx = np.argsort(-np.abs(corr))[:top_m]
             mask = np.zeros(Fz, dtype=bool); mask[top_idx] = True
             F_sel[:, i, :] = Fg[:, i, :] * mask[None, :]
         Fg = F_sel
 
-    # Normalization
+    # ---------- 标准化 ----------
+    # 若给定 mu/sd 则直接使用（推理/验证阶段）
     if (mu is not None) and (sd is not None):
         F_norm = ((Fg - mu) / (sd + 1e-6)).astype(np.float32)
         return F_norm, mu.astype(np.float32), sd.astype(np.float32), names
 
+    # 否则根据当前数据估计（训练阶段）
     if use_robust:
-        med = np.median(Fg, axis=(0,1), keepdims=True)
-        mad = np.median(np.abs(Fg - med), axis=(0,1), keepdims=True) + 1e-6
+        med = np.median(Fg, axis=(0, 1), keepdims=True)
+        mad = np.median(np.abs(Fg - med), axis=(0, 1), keepdims=True) + 1e-6
         F_norm = ((Fg - med) / mad).astype(np.float32)
         return F_norm, med.astype(np.float32), mad.astype(np.float32), names
     else:
-        mu_out = Fg.mean(axis=(0,1), keepdims=True)
-        sd_out = Fg.std(axis=(0,1), keepdims=True) + 1e-6
+        mu_out = Fg.mean(axis=(0, 1), keepdims=True)
+        sd_out = Fg.std(axis=(0, 1), keepdims=True) + 1e-6
         F_norm = ((Fg - mu_out) / sd_out).astype(np.float32)
         return F_norm, mu_out.astype(np.float32), sd_out.astype(np.float32), names
 
@@ -204,8 +257,10 @@ class TorchCausalStateEncoder(nn.Module):
         R_last_self, A_agg_self = out_self['R_layers'][-1], out_self['A_agg']
         
         Ri = F.normalize(R_last_self[:, 0, :], dim=1)
-        a_self = torch.tanh(self.temp * A_agg_self[:, 1, 0]).unsqueeze(1)
         
+        a_self_scalar = 0.5 * (A_agg_self[:, 0, 0] + A_agg_self[:, 1, 1])
+        a_self = torch.tanh(self.temp * a_self_scalar).unsqueeze(1)
+
         causal = (self.self_gate * a_self * Ri).view(B, N, self.d)
 
         if self.edge_index.shape[1] == 0:
@@ -277,26 +332,40 @@ class TorchCausalStateEncoder(nn.Module):
         device = next(self.parameters()).device
         Wt = torch.from_numpy(W).to(device)
 
+        # baseline: no occlusion
         pair0 = torch.stack([Wt[:, :, i], Wt[:, :, j]], dim=-1)
         out0 = self.core(pair0)
         a0 = torch.tanh(self.temp * out0["A_agg"][:, 1, 0]).mean().item()
 
         B, P, _ = W.shape
-        lags = np.arange(1, max_lag + 1)
+        lags = np.arange(1, max_lag + 1, dtype=np.int64)
         drops = []
 
         for L in lags:
-            Wm = Wt.clone()
             a = max(P - L - win + 1, 0)
             b = max(P - L + 1, 1)
+
+            # FIX: 空片段保护
+            if a >= b:
+                drops.append(0.0)
+                continue
+
+            Wm = Wt.clone()
             if mode == 'zero':
                 Wm[:, a:b, j] = 0.0
             elif mode == 'mean':
                 seg_mean = Wt[:, :, j].mean()
                 Wm[:, a:b, j] = seg_mean
             elif mode == 'shuffle':
-                idx = torch.randperm(b - a, device=device)
-                Wm[:, a:b, j] = Wm[:, a_idx:b, j]
+                # FIX: 按 batch 对时间片段做独立洗牌（不跨 batch 混洗）
+                seg = Wm[:, a:b, j]                  # (B, L)
+                B_, L_ = seg.shape
+                if L_ == 0:
+                    drops.append(0.0)
+                    continue
+                perm = torch.stack([torch.randperm(L_, device=device) for _ in range(B_)], dim=0)  # (B,L)
+                seg_shuf = seg.gather(1, perm)      # 按各自的随机置换采样
+                Wm[:, a:b, j] = seg_shuf
             else:
                 raise ValueError("mode must be in {'zero','mean','shuffle'}")
 
