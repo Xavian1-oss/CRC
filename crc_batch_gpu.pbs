@@ -1,0 +1,38 @@
+#!/bin/bash
+#PBS -l select=1:ncpus=8:ngpus=1:mem=92gb
+#PBS -l walltime=10:00:00
+#PBS -N crc_batch_gpu
+#PBS -j oe
+
+set -euo pipefail
+
+# 0) 进入提交时目录
+cd "$PBS_O_WORKDIR"
+
+# 1) 激活环境
+source ~/miniconda3/bin/activate tsl_env
+export CUDA_VISIBLE_DEVICES=0
+
+# 2) 结果/检查点目录（与当前实际目录名一致）
+export RESULT_DIR="/srv/scratch/z5541987/Time-series-library/results"
+export CKPT_DIR="/srv/scratch/z5541987/Time-series-library/checkpoints"
+export TEST_RESULTS_DIR="/srv/scratch/z5541987/Time-series-library/test_results"
+mkdir -p "$RESULT_DIR" "$CKPT_DIR" "$TEST_RESULTS_DIR"
+
+# 3) 打印 GPU/环境信息
+nvidia-smi || true
+python - <<'PY'
+import torch
+print("torch:", torch.__version__)
+print("cuda_available:", torch.cuda.is_available())
+print("device_count:", torch.cuda.device_count())
+if torch.cuda.is_available():
+    print("device_name:", torch.cuda.get_device_name(0))
+PY
+
+# 4) 限制线程
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+
+# 5) 跑批处理
+bash ./run_baseline.sh

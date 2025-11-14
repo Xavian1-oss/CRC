@@ -1,0 +1,58 @@
+Sun Nov  9 17:04:00 2025       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 580.95.05              Driver Version: 580.95.05      CUDA Version: 13.0     |
++-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA L40S                    On  |   00000000:49:00.0 Off |                    0 |
+| N/A   25C    P8             32W /  350W |       0MiB /  46068MiB |      0%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+torch: 2.4.1+cu121
+cuda_available: True
+device_count: 1
+device_name: NVIDIA L40S
+[2025-11-09 17:04:03] ▶️  baseline=TimeXer / ds=Weather / pred=96 (log: ./logs/multi_20251109_170403/Weather_crc_timexer_pl96_dm256.log)
+[2025-11-09 17:21:01] ✅ 完成：Weather / TimeXer / pred_len=96
+[2025-11-09 17:21:01] ▶️  baseline=TimesNet / ds=Weather / pred=96 (log: ./logs/multi_20251109_170403/Weather_crc_timesnet_pl96_dm32.log)
+[2025-11-09 17:31:45] ✅ 完成：Weather / TimesNet / pred_len=96
+[2025-11-09 17:31:45] ▶️  baseline=PatchTST / ds=Weather / pred=96 (log: ./logs/multi_20251109_170403/Weather_crc_patchtst_pl96_dm512.log)
+[2025-11-09 17:43:53] ✅ 完成：Weather / PatchTST / pred_len=96
+[2025-11-09 17:43:53] ▶️  baseline=DLinear / ds=Weather / pred=96 (log: ./logs/multi_20251109_170403/Weather_crc_dlinear_pl96_dm512.log)
+[2025-11-09 17:54:52] ✅ 完成：Weather / DLinear / pred_len=96
+[2025-11-09 17:54:52] ▶️  baseline=TimeXer / ds=Weather / pred=192 (log: ./logs/multi_20251109_170403/Weather_crc_timexer_pl192_dm128.log)
+
+================================================================================
+                     Resource Usage on 09/11/2025 17:55:45                      
+
+Job Id: 7148145 
+Queue: CSE
+Walltime: 00:51:43  (requested 10:00:00)
+Job exited with SIGTERM (15) signal.
+Exit Status 271 - Termination request. See job output error.
+
+--------------------------------------------------------------------------------
+|              |             GPUs              |            Memory             |
+--------------------------------------------------------------------------------
+| Node  GPU ID | Requested   Used   Efficiency | Available   Used              |
+| k173    0    |     1       0.37       37%    | 46068 MiB   3.05G             |
+--------------------------------------------------------------------------------
+|Total         |     1       0.37      37.0%   |                               |
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+|              |             CPUs              |            Memory             |
+--------------------------------------------------------------------------------
+| Node         | Requested   Used   Efficiency | Requested   Used   Efficiency |
+| k173         |     8        1.2      15.0%   |  92.0gb    9.35gb     10.2%   |
+--------------------------------------------------------------------------------

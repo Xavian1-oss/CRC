@@ -207,6 +207,7 @@ class Exp_CRC(Exp_Long_Term_Forecast):
             pre_encoder,
             W_tr, y_tr_win, W_vl, y_vl_win,
             yhat_tr_bl, yhat_vl_bl,
+            mask_ratio=0.0,
             # 其他超参：mask_ratio=0.15, lr=1e-3, wd=1e-4, ...
         )
 
@@ -277,13 +278,23 @@ class Exp_CRC(Exp_Long_Term_Forecast):
 
         for (i,j,_) in top_pairs:
             # 1) Occlusion：对 j→i 扫描滞后
-            lags, O = pre_encoder.encoder.occlusion_curve_a21(W_vl, i=i, j=j, max_lag=min(12, W_vl.shape[1]//2), win=2, mode='mean')
+            lags, O = pre_encoder.encoder.occlusion_curve_a21(
+                W_vl, i=i, j=j, 
+                max_lag=min(12, W_vl.shape[1]//2),
+                win=2, mode='mean'
+            )
+            
             # 2) Cross-corr：用快照近似的连续序列计算 |C|
             xi = snap[:, i]; xj = snap[:, j]
             # 只取正滞后：corr( xi[t], xj[t-L] )
             Lmax = min(12, len(xi)//4)
             C = []
             Ls = list(range(1, Lmax+1))
+            
+            if not Ls: # 如果 Ls 为空（序列太短），则跳过
+                print(f"  pair j→i = {j}→{i} | Skipped (Lmax=0)")
+                continue
+
             for L in Ls:
                 xi_cut = xi[L:]; xj_cut = xj[:-L]
                 C.append( (xi_cut * xj_cut).sum() / (np.sqrt((xi_cut**2).sum()) * np.sqrt((xj_cut**2).sum()) + 1e-8) )
@@ -293,8 +304,41 @@ class Exp_CRC(Exp_Long_Term_Forecast):
             O_n = O[:len(Ls)] / (O[:len(Ls)].max() + 1e-8)
             C_n = np.abs(C) / (np.abs(C).max() + 1e-8)
             rho = spearmanr(O_n, C_n).correlation
+            rho = 0.0 if rho != rho else rho # 处理 NaN 的情况
             l_occ = int(Ls[int(np.argmax(O_n))]); l_xc = int(Ls[int(np.argmax(C_n))])
-            print(f"  pair j→i = {j}→{i} | Δlag={abs(l_occ-l_xc)}, ρ={0.0 if rho!=rho else rho:.2f} (Lmax={Lmax})")
+            print(f"  pair j→i = {j}→{i} | Δlag={abs(l_occ-l_xc)}, ρ={rho:.2f} (Lmax={Lmax})")
+
+            # ========================================================
+            # === 在这里插入您的可视化代码 ===
+            # ========================================================
+            plt.figure(figsize=(10, 4)) # 创建一个新的图形
+            
+            # 绘制模型曲线
+            plt.plot(Ls, O_n, 'b-o', label='Model Importance (Occlusion)', markersize=4, linewidth=2)
+            # 绘制数据曲线
+            plt.plot(Ls, C_n, 'r--s', label='Data Correlation (|C|)', markersize=4, linewidth=2)
+            
+            # 垂直线标记模型峰值
+            plt.axvline(x=l_occ, color='blue', linestyle=':', alpha=0.7, label=f'Model Peak (Lag={l_occ})')
+            # 垂直线标记数据峰值
+            plt.axvline(x=l_xc, color='red', linestyle=':', alpha=0.7, label=f'Data Peak (Lag={l_xc})')
+
+            plt.title(f"Lag Consistency Check: pair j→i = {j}→{i}\nΔlag={abs(l_occ-l_xc)}, ρ={rho:.2f}")
+            plt.xlabel("Lag (L steps)")
+            plt.ylabel("Normalized Importance / Correlation")
+            plt.legend()
+            plt.grid(True, linestyle=':', alpha=0.6)
+            plt.ylim(-0.05, 1.05) # 设置Y轴范围
+            plt.xlim(0, Lmax + 1) # 设置X轴范围
+            plt.tight_layout()
+            
+            # 确保 viz_dir 变量在循环外已经定义
+            save_path = os.path.join(viz_dir, f"lag_consistency_pair_{j}_to_{i}.png")
+            plt.savefig(save_path, dpi=150)
+            plt.close() # <-- 在循环中必须关闭图形，防止内存泄漏和图表重叠
+            # ========================================================
+            # === 可视化代码结束 ===
+            # ========================================================
 
         print("\n>>>>>>> CRC 训练流程全部完成 <<<<<<<")
         return self.hybrid_corrector
@@ -377,23 +421,23 @@ class Exp_CRC(Exp_Long_Term_Forecast):
         print(f"MSE 相对提升率: {mse_improve:.2f}%")
         print("=" * 50)
 
-        # # ---------- 可视化（可选） ----------
-        # folder_path = './test_results/' + setting + '/'
-        # os.makedirs(folder_path, exist_ok=True)
-        # print("生成可视化图片...")
-        # for i in range(min(W_te.shape[0], 100)):
-        #     if i % 20 == 0:
-        #         # 仍沿用“最后一列”的可视化习惯；如需严格按目标列索引，按需替换这里的 -1
-        #         gt = np.concatenate((W_te[i, :, -1], y_te[i, :, -1]), axis=0)
-        #         pd = np.concatenate((W_te[i, :, -1], yfinal_te[i, :, -1]), axis=0)
-        #         visual(gt, pd, os.path.join(folder_path, f'{i}.pdf'))
-        # print(f"图片保存在: {folder_path}")
+        # ---------- 可视化（可选） ----------
+        folder_path = './test_results/' + setting + '/'
+        os.makedirs(folder_path, exist_ok=True)
+        print("生成可视化图片...")
+        for i in range(min(W_te.shape[0], 100)):
+            if i % 20 == 0:
+                # 仍沿用“最后一列”的可视化习惯；如需严格按目标列索引，按需替换这里的 -1
+                gt = np.concatenate((W_te[i, :, -1], y_te[i, :, -1]), axis=0)
+                pd = np.concatenate((W_te[i, :, -1], yfinal_te[i, :, -1]), axis=0)
+                visual(gt, pd, os.path.join(folder_path, f'{i}.pdf'))
+        print(f"图片保存在: {folder_path}")
 
-        # # ---------- 保存结果 ----------
-        # folder_path = './results/' + setting + '/'
-        # os.makedirs(folder_path, exist_ok=True)
-        # np.save(folder_path + 'metrics.npy', np.array([final_mae, final_mse]))
-        # np.save(folder_path + 'pred.npy', yfinal_te)
-        # np.save(folder_path + 'true.npy', y_te)
-        # np.save(folder_path + 'pred_baseline.npy', yhat_te_bl)
-        # return
+        # ---------- 保存结果 ----------
+        folder_path = './results/' + setting + '/'
+        os.makedirs(folder_path, exist_ok=True)
+        np.save(folder_path + 'metrics.npy', np.array([final_mae, final_mse]))
+        np.save(folder_path + 'pred.npy', yfinal_te)
+        np.save(folder_path + 'true.npy', y_te)
+        np.save(folder_path + 'pred_baseline.npy', yhat_te_bl)
+        return

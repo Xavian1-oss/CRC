@@ -27,7 +27,7 @@ INVERSE=''   # 若要还原尺度评估，设为 '--inverse'
 
 # ================== 想批量跑的组合 ==================
 DATASETS=(Weather)
-PRED_LENS=(96 192 336 720) # 注意：你之前的脚本只运行到336，现在加回了720
+PRED_LENS=(96 192 336) # 注意：你之前的脚本只运行到336，现在加回了720
 BASELINES=(TimeXer TimesNet PatchTST DLinear)
 
 # ================== 数据集路径与通道数 ==================
@@ -116,9 +116,8 @@ MASTER_LOG="${LOG_DIR}/master.log"
 log() { echo "[$(date +'%F %T')] $*" | tee -a "${MASTER_LOG}"; }
 trap 'ecode=$?; [ $ecode -ne 0 ] && log "❌ 脚本异常退出，退出码=${ecode}"; exit $ecode' EXIT
 
-# ================== 单次运行 ==================
 run_with_log () {
-  local baseline="$1"   # PatchTST / TimesNet / ...
+  local baseline="$1"   # PatchTST / TimesNet / TimeXer / ...
   local ds="$2"         # 数据集
   local pred="$3"       # 预测步长
 
@@ -129,7 +128,7 @@ run_with_log () {
     data_arg="custom"
   fi
 
-  # —— 取这次要用的超参（查表合并） —— (已升级，包含所有 GDEF 参数)
+  # —— 取超参（查表合并） ——
   local LRv       ; LRv=$(getp "$baseline" "$ds" "$pred" "LR")
   local BATCHv    ; BATCHv=$(getp "$baseline" "$ds" "$pred" "BATCH")
   local PATIENCEv ; PATIENCEv=$(getp "$baseline" "$ds" "$pred" "PATIENCE")
@@ -140,7 +139,6 @@ run_with_log () {
   local DFFv      ; DFFv=$(getp "$baseline" "$ds" "$pred" "DFF")
   local PATCHLENv ; PATCHLENv=$(getp "$baseline" "$ds" "$pred" "PATCH_LEN")
   local FACTORv   ; FACTORv=$(getp "$baseline" "$ds" "$pred" "FACTOR")
-  local TOP_Kv    ; TOP_Kv=$(getp "$baseline" "$ds" "$pred" "TOP_K")
   local MOVAVGv   ; MOVAVGv=$(getp "$baseline" "$ds" "$pred" "MOVING_AVG")
   local SEQLENv   ; SEQLENv=$(getp "$baseline" "$ds" "$pred" "SEQ_LEN")
   local LABELLENv ; LABELLENv=$(getp "$baseline" "$ds" "$pred" "LABEL_LEN")
@@ -149,20 +147,20 @@ run_with_log () {
   local LRADJv    ; LRADJv=$(getp "$baseline" "$ds" "$pred" "LRADJ")
   local USEAMPv   ; USEAMPv=$(getp "$baseline" "$ds" "$pred" "USE_AMP")
 
-  local tag="${ds}_crc_${baseline,,}_pl${pred}_dm${DMODELv}"
+  # —— 只跑 Baseline：重新命名 tag，去掉 “crc” 前缀 ——
+  local tag="${ds}_${baseline,,}_pl${pred}_dm${DMODELv}"
   local log_file="${LOG_DIR}/${tag}.log"
 
-  log "▶️  baseline=${baseline} / ds=${ds} / pred=${pred} (log: ${log_file})"
+  log "▶️  BASELINE ONLY  baseline=${baseline} / ds=${ds} / pred=${pred} (log: ${log_file})"
 
-  # ------- 回显命令 ------- (已修正，使用 ...v 变量)
+  # ------- 回显命令 -------
   {
     echo "CMD @ $(date +'%F %T')"
     cat <<EOF
 python -u run.py \
   --task_name long_term_forecast \
   --is_training 1 \
-  --model CRC \
-  --baseline_model ${baseline} \
+  --model ${baseline} \
   --model_id ${tag} \
   --data ${data_arg} \
   --root_path ${ROOT} \
@@ -181,7 +179,6 @@ python -u run.py \
   --d_ff ${DFFv} \
   --patch_len "${PATCHLENv}" \
   --factor ${FACTORv} \
-  --top_k ${TOP_Kv} \
   --moving_avg ${MOVAVGv} \
   --batch_size ${BATCHv} \
   --learning_rate ${LRv} \
@@ -194,18 +191,16 @@ python -u run.py \
   --gpu 0 \
   ${USE_DTW:-} ${INVERSE} \
   ${USEAMPv} \
-  --q_val ${Q_VAL} \
-  --des CRC_${baseline}_M_d${DMODELv}
+  --des BASELINE_${baseline}_M_d${DMODELv}
 EOF
   } | tee -a "${log_file}" >> "${MASTER_LOG}"
 
-  # ------- 真正执行 ------- (已修正，使用 ...v 变量)
+  # ------- 真正执行 -------
   set +e
   python -u run.py \
     --task_name long_term_forecast \
     --is_training 1 \
-    --model CRC \
-    --baseline_model "${baseline}" \
+    --model "${baseline}" \
     --model_id "${tag}" \
     --data "${data_arg}" \
     --root_path "${ROOT}" \
@@ -224,7 +219,6 @@ EOF
     --d_ff "${DFFv}" \
     --patch_len "${PATCHLENv}" \
     --factor "${FACTORv}" \
-    --top_k "${TOP_Kv}" \
     --moving_avg "${MOVAVGv}" \
     --batch_size "${BATCHv}" \
     --learning_rate "${LRv}" \
@@ -237,20 +231,20 @@ EOF
     --gpu 0 \
     ${USE_DTW:-} ${INVERSE} \
     ${USEAMPv} \
-    --q_val "${Q_VAL}" \
-    --des "CRC_${baseline}_M_d${DMODELv}" \
+    --des "BASELINE_${baseline}_M_d${DMODELv}" \
     2> >(tee -a "${log_file}" >> "${MASTER_LOG}" >&2) \
     | tee -a "${log_file}" >> "${MASTER_LOG}"
   ecode=${PIPESTATUS[0]}
   set -e
 
   if [ $ecode -eq 0 ]; then
-    log "✅ 完成：${ds} / ${baseline} / pred_len=${pred}"
+    log "✅ 完成：BASELINE ${ds} / ${baseline} / pred_len=${pred}"
   else
     log "❌ 失败：${ds} / ${baseline} / pred_len=${pred}，退出码=${ecode}（详见 ${log_file}）"
     return $ecode
   fi
 }
+
 
 # ================== 批量调度 ==================
 for ds in "${DATASETS[@]}"; do
