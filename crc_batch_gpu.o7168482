@@ -1,4 +1,4 @@
-Sun Nov  9 17:04:00 2025       
+Fri Nov 14 17:34:39 2025       
 +-----------------------------------------------------------------------------------------+
 | NVIDIA-SMI 580.95.05              Driver Version: 580.95.05      CUDA Version: 13.0     |
 +-----------------------------------------+------------------------+----------------------+
@@ -6,9 +6,9 @@ Sun Nov  9 17:04:00 2025
 | Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
 |                                         |                        |               MIG M. |
 |=========================================+========================+======================|
-|   0  NVIDIA L40S                    On  |   00000000:49:00.0 Off |                    0 |
-| N/A   25C    P8             32W /  350W |       0MiB /  46068MiB |      0%      Default |
-|                                         |                        |                  N/A |
+|   0  NVIDIA H200                    On  |   00000000:1D:00.0 Off |                    0 |
+| N/A   32C    P0             78W /  700W |       0MiB / 143771MiB |      0%      Default |
+|                                         |                        |             Disabled |
 +-----------------------------------------+------------------------+----------------------+
 
 +-----------------------------------------------------------------------------------------+
@@ -21,38 +21,40 @@ Sun Nov  9 17:04:00 2025
 torch: 2.4.1+cu121
 cuda_available: True
 device_count: 1
-device_name: NVIDIA L40S
-[2025-11-09 17:04:03] ▶️  baseline=TimeXer / ds=Weather / pred=96 (log: ./logs/multi_20251109_170403/Weather_crc_timexer_pl96_dm256.log)
-[2025-11-09 17:21:01] ✅ 完成：Weather / TimeXer / pred_len=96
-[2025-11-09 17:21:01] ▶️  baseline=TimesNet / ds=Weather / pred=96 (log: ./logs/multi_20251109_170403/Weather_crc_timesnet_pl96_dm32.log)
-[2025-11-09 17:31:45] ✅ 完成：Weather / TimesNet / pred_len=96
-[2025-11-09 17:31:45] ▶️  baseline=PatchTST / ds=Weather / pred=96 (log: ./logs/multi_20251109_170403/Weather_crc_patchtst_pl96_dm512.log)
-[2025-11-09 17:43:53] ✅ 完成：Weather / PatchTST / pred_len=96
-[2025-11-09 17:43:53] ▶️  baseline=DLinear / ds=Weather / pred=96 (log: ./logs/multi_20251109_170403/Weather_crc_dlinear_pl96_dm512.log)
-[2025-11-09 17:54:52] ✅ 完成：Weather / DLinear / pred_len=96
-[2025-11-09 17:54:52] ▶️  baseline=TimeXer / ds=Weather / pred=192 (log: ./logs/multi_20251109_170403/Weather_crc_timexer_pl192_dm128.log)
+device_name: NVIDIA H200
+[2025-11-14 17:34:43] ▶️  baseline=TimeXer / ds=Weather / pred=96 (log: ./logs/multi_20251114_173442/Weather_crc_timexer_pl96_dm256.log·)
+Traceback (most recent call last):
+  File "run.py", line 10, in <module>
+    from exp.exp_crc import Exp_CRC  # <<< 变更点 1：导入您的新实验类
+  File "/srv/scratch/z5541987/Time-series-library/exp/exp_crc.py", line 19, in <module>
+    import seaborn as sns
+ModuleNotFoundError: No module named 'seaborn'
+[2025-11-14 17:34:53] ❌ 失败：Weather / TimeXer / pred_len=96，退出码=1（详见 ./logs/multi_20251114_173442/Weather_crc_timexer_pl96_dm256.log）
+[2025-11-14 17:34:53] ❌ 脚本异常退出，退出码=1
 
 ================================================================================
-                     Resource Usage on 09/11/2025 17:55:45                      
+                     Resource Usage on 14/11/2025 17:34:56                      
 
-Job Id: 7148145 
+Job Id: 7168482 
 Queue: CSE
-Walltime: 00:51:43  (requested 10:00:00)
-Job exited with SIGTERM (15) signal.
-Exit Status 271 - Termination request. See job output error.
+Walltime: 00:00:21  (requested 10:00:00)
+Job unsucesfull. Exit Status 1 - Exit status refers to the exit value of the
+top process in the job, typically the shell.
+This may be the exit value of the last command executed in the shell.
+See job output error.
 
 --------------------------------------------------------------------------------
 |              |             GPUs              |            Memory             |
 --------------------------------------------------------------------------------
 | Node  GPU ID | Requested   Used   Efficiency | Available   Used              |
-| k173    0    |     1       0.37       37%    | 46068 MiB   3.05G             |
+| k202    0    |     1        0.0       0%     |143771 MiB   0.0B              |
 --------------------------------------------------------------------------------
-|Total         |     1       0.37      37.0%   |                               |
+|Total         |     1        0.0      0.0%    |                               |
 --------------------------------------------------------------------------------
 
 --------------------------------------------------------------------------------
 |              |             CPUs              |            Memory             |
 --------------------------------------------------------------------------------
 | Node         | Requested   Used   Efficiency | Requested   Used   Efficiency |
-| k173         |     8        1.2      15.0%   |  92.0gb    9.35gb     10.2%   |
+| k202         |     8       0.29      4.0%    |  92.0gb    0.34gb     0.4%    |
 --------------------------------------------------------------------------------

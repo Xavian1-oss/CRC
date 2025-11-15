@@ -15,7 +15,8 @@ from utils.dtw_metric import accelerated_dtw
 from utils.tools import visual
 import matplotlib.pyplot as plt
 import networkx as nx
-from scipy.stats import spearmanr 
+from scipy.stats import spearmanr
+import seaborn as sns
 
 
 warnings.filterwarnings('ignore')
@@ -43,30 +44,42 @@ def visualize_time_causality_matrix(stcl_core, save_dir=None, tag="val"):
     if save_dir: plt.savefig(os.path.join(save_dir, f"time_importance_{tag}.png"), dpi=200)
     plt.close()
 
-
-# === 空间因果：把 S 画成有向图（S[i,j] ≈ j→i 强度；只画 |S|>thr 的边） ===
-def visualize_spatial_causal_graph(S, node_names=None, thr=0.0, save_dir=None, tag="val"):
+def visualize_spatial_causal_heatmap(S, node_names=None, save_dir=None, tag="val"):
+    """
+    使用热力图可视化空间因果矩阵 S。
+    基于您的代码，S[i, j] 对应 j -> i 的因果强度。
+    """
     N = S.shape[0]
     if node_names is None:
         node_names = [f"N{i}" for i in range(N)]
-    G = nx.DiGraph()
-    for i in range(N):
-        G.add_node(node_names[i])
-    for i in range(N):
-        for j in range(N):
-            if i==j: continue
-            w = float(S[i,j])
-            if abs(w) > thr:
-                G.add_edge(node_names[j], node_names[i], weight=w)  # j→i
-
-    pos = nx.spring_layout(G, seed=42)
-    widths = [max(0.6, 4*abs(G[u][v]['weight'])) for u,v in G.edges()]
-    plt.figure(figsize=(7,7))
-    nx.draw(G, pos, with_labels=True, node_color='lightblue', node_size=1200,
-            arrows=True, width=widths, arrowstyle='-|>', arrowsize=16)
-    plt.title("Spatial Causal Graph (edge: j→i, width∝|strength|)")
+    
+    figsize = (max(8, N // 3), max(6, N // 3))
+    plt.figure(figsize=figsize)
+    
+    ax = sns.heatmap(
+        S, 
+        xticklabels=node_names, 
+        yticklabels=node_names,
+        cmap='RdBu_r',       # 推荐使用发散色图
+        center=0,            # 将 0 设置为颜色的中心
+        annot=False,         # 如果 N 较小 (如 N < 30)，可设为 True 来显示数字
+        fmt=".2f"            # (如果 annot=True) 数字的格式
+    )
+    
+    plt.xlabel("Source Node (j)   [j → i]", fontsize=12)
+    plt.ylabel("Target Node (i)   [j → i]", fontsize=12)
+    
+    # 旋转 x 轴标签，防止重叠
+    plt.xticks(rotation=90) 
+    plt.yticks(rotation=0)
+    
+    plt.title(f"Spatial Causality Matrix (Heatmap: S[i, j] = strength of j → i)")
     plt.tight_layout()
-    if save_dir: plt.savefig(os.path.join(save_dir, f"spatial_causal_graph_{tag}.png"), dpi=200)
+    
+    if save_dir:
+        save_path = os.path.join(save_dir, f"spatial_causal_heatmap_{tag}.png")
+        print(f"Saving heatmap to {save_path}")
+        plt.savefig(save_path, dpi=200)
     plt.close()
 
 
@@ -253,8 +266,8 @@ class Exp_CRC(Exp_Long_Term_Forecast):
         print("[Viz] 估计空间因果矩阵 S (j→i) 并可视化 ...")
         S_val = pre_encoder.encoder.estimate_spatial_causality_matrix(W_vl, batch_size=256)  # (N,N)
         np.save(os.path.join(viz_dir, 'S_val.npy'), S_val)
-        visualize_spatial_causal_graph(S_val, node_names=[f"N{i}" for i in range(S_val.shape[0])],
-                                       thr=0.0, save_dir=viz_dir, tag="val")
+        node_names_list = [f"N{i}" for i in range(S_val.shape[0])]
+        visualize_spatial_causal_heatmap(S_val, node_names=node_names_list, save_dir=viz_dir, tag="val")
 
         # >>>>>>>>>>>>> INSERT HERE: 与先验的一致性（避免“自我检查”，只是报告用） <<<<<<<<<<<<<
         print("[Check] 先验一致性指标（与 A_corr 对比，仅做报告，不作为“真值”）")
