@@ -293,17 +293,29 @@ class TorchCausalStateEncoder(nn.Module):
         return causal / (self.deg + self.self_gate).view(1, -1, 1)
 
     @torch.no_grad()
-    def estimate_spatial_causality_matrix(self, W: np.ndarray, batch_size: int = 256) -> np.ndarray:
+    def estimate_spatial_causality_matrix(self, W: np.ndarray, batch_size: int = 256, 
+                                        return_series: bool = False) -> np.ndarray | Tuple[np.ndarray, np.ndarray]:
+        """
+        估计空间因果矩阵。
+        
+        新增 (MOD):
+        :param return_series: 若为 True，则额外返回 (B, num_edges) 的动态 a21 序列。
+        :return: 
+            S: (N, N) 平均因果矩阵
+            all_strengths_tensor (optional): (B, num_edges) 动态 a21 序列
+        """
         self.eval()
         device = next(self.parameters()).device
         N = W.shape[2]
         S = np.zeros((N, N), dtype=np.float32)
 
         if self.edge_index.shape[1] == 0:
+            if return_series:
+                return S, np.empty((W.shape[0], 0), dtype=np.float32)
             return S
         
-        source_nodes_idx, target_nodes_idx = self.edge_index[0].cpu().numpy(), self.edge_index[1].cpu().numpy()
-        all_strengths = []
+        source_nodes_idx, target_nodes_idx = self.edge_index[0], self.edge_index[1]
+        all_strengths_list = [] # <-- MOD: 名字从 all_strengths 改为 all_strengths_list
 
         for k in range(0, W.shape[0], batch_size):
             Wb = torch.from_numpy(W[k:k+batch_size]).to(device)
@@ -319,62 +331,21 @@ class TorchCausalStateEncoder(nn.Module):
             A_agg_edge = out_edge['A_agg']
             
             a21 = torch.tanh(self.temp * A_agg_edge[:, 1, 0])
-            all_strengths.append(a21.view(B, -1).detach().cpu())
+            all_strengths_list.append(a21.view(B, -1).detach().cpu()) # <-- MOD: 使用 .append()
 
-        avg_strengths = torch.cat(all_strengths, dim=0).mean(dim=0).numpy()
-        S[target_nodes_idx, source_nodes_idx] = avg_strengths
-        return S
-
-    @torch.no_grad()
-    def occlusion_curve_a21(self, W: np.ndarray, i: int, j: int,
-                            max_lag: int = 12, win: int = 1, mode: str = 'mean') -> Tuple[np.ndarray, np.ndarray]:
-        self.eval()
-        device = next(self.parameters()).device
-        Wt = torch.from_numpy(W).to(device)
-
-        # baseline: no occlusion
-        pair0 = torch.stack([Wt[:, :, i], Wt[:, :, j]], dim=-1)
-        out0 = self.core(pair0)
-        a0 = torch.tanh(self.temp * out0["A_agg"][:, 1, 0]).mean().item()
-
-        B, P, _ = W.shape
-        lags = np.arange(1, max_lag + 1, dtype=np.int64)
-        drops = []
-
-        for L in lags:
-            a = max(P - L - win + 1, 0)
-            b = max(P - L + 1, 1)
-
-            # FIX: 空片段保护
-            if a >= b:
-                drops.append(0.0)
-                continue
-
-            Wm = Wt.clone()
-            if mode == 'zero':
-                Wm[:, a:b, j] = 0.0
-            elif mode == 'mean':
-                seg_mean = Wt[:, :, j].mean()
-                Wm[:, a:b, j] = seg_mean
-            elif mode == 'shuffle':
-                # FIX: 按 batch 对时间片段做独立洗牌（不跨 batch 混洗）
-                seg = Wm[:, a:b, j]                  # (B, L)
-                B_, L_ = seg.shape
-                if L_ == 0:
-                    drops.append(0.0)
-                    continue
-                perm = torch.stack([torch.randperm(L_, device=device) for _ in range(B_)], dim=0)  # (B,L)
-                seg_shuf = seg.gather(1, perm)      # 按各自的随机置换采样
-                Wm[:, a:b, j] = seg_shuf
-            else:
-                raise ValueError("mode must be in {'zero','mean','shuffle'}")
-
-            pair = torch.stack([Wm[:, :, i], Wm[:, :, j]], dim=-1)
-            out = self.core(pair)
-            a1 = torch.tanh(self.temp * out["A_agg"][:, 1, 0]).mean().item()
-            drops.append(max(0.0, a0 - a1))
-
-        return lags, np.asarray(drops, dtype=np.float32)
+        # --- MOD: 在 .mean() 之前保存完整的序列 ---
+        all_strengths_tensor = torch.cat(all_strengths_list, dim=0) # (B, num_edges)
+        
+        # 计算平均值 S 矩阵 (这部分不变)
+        avg_strengths = all_strengths_tensor.mean(dim=0).numpy() # (num_edges,)
+        S[target_nodes_idx.cpu().numpy(), source_nodes_idx.cpu().numpy()] = avg_strengths
+        
+        if return_series:
+            # S 是 (N,N) numpy 矩阵
+            # all_strengths_tensor 是 (B, num_edges) numpy 矩阵
+            return S, all_strengths_tensor.numpy()
+        else:
+            return S
 
 class PretrainableEncoderMTL(nn.Module):
     def __init__(self, A: np.ndarray, P: int, H: int, N: int, d_model: int = 64, Q: int = 2, recon_hidden: int = 64):

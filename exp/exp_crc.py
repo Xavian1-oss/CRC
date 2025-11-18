@@ -15,34 +15,17 @@ from utils.dtw_metric import accelerated_dtw
 from utils.tools import visual
 import matplotlib.pyplot as plt
 import networkx as nx
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 from scipy.stats import spearmanr
 import seaborn as sns
 
 
 warnings.filterwarnings('ignore')
 
-# === 时间因果：TCL 第一层权重可视化（热力图 + 平均重要性曲线） ===
-def visualize_time_causality_matrix(stcl_core, save_dir=None, tag="val"):
-    W = stcl_core.b[0].l.weight.detach().cpu().numpy()  # (d, P)
-    Wn = W / (np.abs(W).max() + 1e-8)
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 
-    plt.figure(figsize=(9, 3))
-    plt.imshow(Wn, cmap='RdBu_r', aspect='auto', vmin=-1, vmax=1)
-    plt.colorbar(label='Normalized weight')
-    plt.xlabel('Historical step (0..P-1)'); plt.ylabel('Hidden unit')
-    plt.title('Time Causality Matrix (TCL layer-1)')
-    plt.tight_layout()
-    if save_dir: plt.savefig(os.path.join(save_dir, f"time_causality_{tag}.png"), dpi=200)
-    plt.close()
-
-    imp = np.abs(W).mean(axis=0); imp /= (imp.max() + 1e-8)
-    plt.figure(figsize=(8, 2.6))
-    plt.plot(imp, '-o', ms=3); plt.grid(True, alpha=0.3)
-    plt.xlabel('Historical step'); plt.ylabel('Normalized importance')
-    plt.title('Temporal Importance Curve')
-    plt.tight_layout()
-    if save_dir: plt.savefig(os.path.join(save_dir, f"time_importance_{tag}.png"), dpi=200)
-    plt.close()
 
 def visualize_spatial_causal_heatmap(S, node_names=None, save_dir=None, tag="val"):
     """
@@ -81,23 +64,6 @@ def visualize_spatial_causal_heatmap(S, node_names=None, save_dir=None, tag="val
         print(f"Saving heatmap to {save_path}")
         plt.savefig(save_path, dpi=200)
     plt.close()
-
-
-# === 先验一致性与滞后一致性的一些指标（简版） ===
-def precision_at_k_vs_prior(S, A_prior, k_ratio=0.1):
-    N = S.shape[0]; M = N*(N-1); k = max(1, int(k_ratio*M))
-    mask = ~np.eye(N, dtype=bool)
-    scores = np.abs(S[mask]).flatten()
-    prior  = A_prior[mask].flatten().astype(np.int32)
-    top_idx = np.argsort(-scores)[:k]
-    return float(prior[top_idx].mean())
-
-def spearman_vs_prior(S, A_prior):
-    mask = ~np.eye(S.shape[0], dtype=bool)
-    s = np.abs(S[mask]).flatten()
-    p = A_prior[mask].flatten()
-    rho = spearmanr(s, p).correlation
-    return float(rho) if rho==rho else 0.0
 
 def quick_val_series_from_windows(W_val):
     """
@@ -224,12 +190,6 @@ class Exp_CRC(Exp_Long_Term_Forecast):
             # 其他超参：mask_ratio=0.15, lr=1e-3, wd=1e-4, ...
         )
 
-        # >>>>>>>>>>>>> INSERT HERE: 时间因果可视化（基于 encoder.core 第一层） <<<<<<<<<<<<<
-        viz_dir = os.path.join('./results', setting, 'viz_train')
-        os.makedirs(viz_dir, exist_ok=True)
-        print("[Viz] 绘制时间因果热力图/曲线 ...")
-        visualize_time_causality_matrix(pre_encoder.encoder.core, save_dir=viz_dir, tag="after_stageA")
-
         # 3) Stage B：Hybrid 纠偏（多尺度先验）
         print("\n--- Stage B: Hybrid Corrector (multi-scale priors) ---")
         # 仅用训练集生成先验统计（mu/sd）
@@ -264,94 +224,12 @@ class Exp_CRC(Exp_Long_Term_Forecast):
 
         # >>>>>>>>>>>>> INSERT HERE: 空间因果矩阵 S（基于验证集窗口）& 可视化 <<<<<<<<<<<<<
         print("[Viz] 估计空间因果矩阵 S (j→i) 并可视化 ...")
+        viz_dir = os.path.join('./results', setting, 'viz_train')
+        os.makedirs(viz_dir, exist_ok=True)
         S_val = pre_encoder.encoder.estimate_spatial_causality_matrix(W_vl, batch_size=256)  # (N,N)
         np.save(os.path.join(viz_dir, 'S_val.npy'), S_val)
         node_names_list = [f"N{i}" for i in range(S_val.shape[0])]
         visualize_spatial_causal_heatmap(S_val, node_names=node_names_list, save_dir=viz_dir, tag="val")
-
-        # >>>>>>>>>>>>> INSERT HERE: 与先验的一致性（避免“自我检查”，只是报告用） <<<<<<<<<<<<<
-        print("[Check] 先验一致性指标（与 A_corr 对比，仅做报告，不作为“真值”）")
-        prec10 = precision_at_k_vs_prior(S_val, A_prior=A, k_ratio=0.10)
-        rho_sp = spearman_vs_prior(S_val, A_prior=A)
-        print(f"Precision@10% (S vs A_corr): {prec10:.3f}")
-        print(f"Spearman (|S| vs A_corr): {rho_sp:.3f}")
-
-        # >>>>>>>>>>>>> INSERT HERE: 滞后一致性（O vs |C|），先用快照序列做近似 <<<<<<<<<<<<<
-        print("[Check] 滞后一致性（occlusion vs cross-corr）...")
-        # 选几条最强边（按 |S| 排序），以免全量太慢
-        N = S_val.shape[0]
-        cand = [(i,j,abs(S_val[i,j])) for i in range(N) for j in range(N) if i!=j and S_val[i,j]!=0]
-        cand.sort(key=lambda x: -x[2])
-        top_pairs = cand[: min(len(cand), 8)]  # 例如取前 8 条
-
-        # 快照近似的连续序列 (B,N)
-        snap = quick_val_series_from_windows(W_vl)
-        # 简易标准化
-        snap = (snap - snap.mean(axis=0, keepdims=True)) / (snap.std(axis=0, keepdims=True) + 1e-8)
-
-        for (i,j,_) in top_pairs:
-            # 1) Occlusion：对 j→i 扫描滞后
-            lags, O = pre_encoder.encoder.occlusion_curve_a21(
-                W_vl, i=i, j=j, 
-                max_lag=min(12, W_vl.shape[1]//2),
-                win=2, mode='mean'
-            )
-            
-            # 2) Cross-corr：用快照近似的连续序列计算 |C|
-            xi = snap[:, i]; xj = snap[:, j]
-            # 只取正滞后：corr( xi[t], xj[t-L] )
-            Lmax = min(12, len(xi)//4)
-            C = []
-            Ls = list(range(1, Lmax+1))
-            
-            if not Ls: # 如果 Ls 为空（序列太短），则跳过
-                print(f"  pair j→i = {j}→{i} | Skipped (Lmax=0)")
-                continue
-
-            for L in Ls:
-                xi_cut = xi[L:]; xj_cut = xj[:-L]
-                C.append( (xi_cut * xj_cut).sum() / (np.sqrt((xi_cut**2).sum()) * np.sqrt((xj_cut**2).sum()) + 1e-8) )
-            C = np.asarray(C, dtype=np.float32)
-
-            # 3) 指标
-            O_n = O[:len(Ls)] / (O[:len(Ls)].max() + 1e-8)
-            C_n = np.abs(C) / (np.abs(C).max() + 1e-8)
-            rho = spearmanr(O_n, C_n).correlation
-            rho = 0.0 if rho != rho else rho # 处理 NaN 的情况
-            l_occ = int(Ls[int(np.argmax(O_n))]); l_xc = int(Ls[int(np.argmax(C_n))])
-            print(f"  pair j→i = {j}→{i} | Δlag={abs(l_occ-l_xc)}, ρ={rho:.2f} (Lmax={Lmax})")
-
-            # ========================================================
-            # === 在这里插入您的可视化代码 ===
-            # ========================================================
-            plt.figure(figsize=(10, 4)) # 创建一个新的图形
-            
-            # 绘制模型曲线
-            plt.plot(Ls, O_n, 'b-o', label='Model Importance (Occlusion)', markersize=4, linewidth=2)
-            # 绘制数据曲线
-            plt.plot(Ls, C_n, 'r--s', label='Data Correlation (|C|)', markersize=4, linewidth=2)
-            
-            # 垂直线标记模型峰值
-            plt.axvline(x=l_occ, color='blue', linestyle=':', alpha=0.7, label=f'Model Peak (Lag={l_occ})')
-            # 垂直线标记数据峰值
-            plt.axvline(x=l_xc, color='red', linestyle=':', alpha=0.7, label=f'Data Peak (Lag={l_xc})')
-
-            plt.title(f"Lag Consistency Check: pair j→i = {j}→{i}\nΔlag={abs(l_occ-l_xc)}, ρ={rho:.2f}")
-            plt.xlabel("Lag (L steps)")
-            plt.ylabel("Normalized Importance / Correlation")
-            plt.legend()
-            plt.grid(True, linestyle=':', alpha=0.6)
-            plt.ylim(-0.05, 1.05) # 设置Y轴范围
-            plt.xlim(0, Lmax + 1) # 设置X轴范围
-            plt.tight_layout()
-            
-            # 确保 viz_dir 变量在循环外已经定义
-            save_path = os.path.join(viz_dir, f"lag_consistency_pair_{j}_to_{i}.png")
-            plt.savefig(save_path, dpi=150)
-            plt.close() # <-- 在循环中必须关闭图形，防止内存泄漏和图表重叠
-            # ========================================================
-            # === 可视化代码结束 ===
-            # ========================================================
 
         print("\n>>>>>>> CRC 训练流程全部完成 <<<<<<<")
         return self.hybrid_corrector
@@ -390,6 +268,12 @@ class Exp_CRC(Exp_Long_Term_Forecast):
 
         print("使用 Hybrid Corrector 对基线预测进行校正...")
         yfinal_te = self.hybrid_corrector.predict(W_te, yhat_te_bl)  # (B, H, C_sel)
+
+        # 在这里插入 NDR (非恶化率) 计算 
+        err_baseline = np.abs(y_te - yhat_te_bl)
+        err_final = np.abs(y_te - yfinal_te)
+        non_degraded_mask = err_final <= (err_baseline + 1e-8)
+        paper_ndr = np.mean(non_degraded_mask) * 100.0
 
         # ---------- 与 LTF 对齐的可选 inverse ----------
         if getattr(test_set, "scale", False) and getattr(self.args, "inverse", False):
@@ -432,6 +316,7 @@ class Exp_CRC(Exp_Long_Term_Forecast):
         mse_improve = (base_mse - final_mse) / max(base_mse, 1e-8) * 100
         print(f"MAE 相对提升率: {mae_improve:.2f}%")
         print(f"MSE 相对提升率: {mse_improve:.2f}%")
+        print(f"NDR (非恶化率): {paper_ndr:.1f}%") # 保持一位小数
         print("=" * 50)
 
         # ---------- 可视化（可选） ----------
