@@ -5,18 +5,16 @@ set -euo pipefail
 export CUDA_VISIBLE_DEVICES=0
 
 # --- 以下参数为 GDEF 之外的全局设置 ---
-Q_VAL=3
 # USE_DTW=--use_dtw
+Q_VAL=3
 INVERSE=''   # 若要还原尺度评估，设为 '--inverse'
 
 # ================== 想批量跑的组合 ==================
-# (只保留 WPMixer 和 ETTh1)
-DATASETS=(Electricity Traffic)
-PRED_LENS=(96 192 336)
-BASELINES=(WPMixer)
+DATASETS=(Electricity)
+PRED_LENS=(96 192 336 720)
+BASELINES=(PatchTST TimesNet TimeXer DLinear)
 
 # ================== 数据集路径与通道数 ==================
-# (保留这个函数，以后可能跑 WPMixer on ETTh2)
 dataset_setup () {
   local ds="$1"
   case "$ds" in
@@ -34,7 +32,6 @@ dataset_setup () {
 
 # ================== 三层默认 + 查表覆盖 ==================
 # 0) 全局缺省 (与 run.py 的 argparse default 保持一致)
-# (这个 GDEF 必须保留，WPMixer 依赖它获取 DLAYERS, NHEADS 等默认值)
 declare -A GDEF=(
   [LR]="1e-4" [BATCH]="32" [PATIENCE]="3"
   [DMODEL]="512" [NHEADS]="8" [ELAYERS]="2" [DLAYERS]="1" [DFF]="2048"
@@ -47,175 +44,188 @@ declare -A GDEF=(
   [USE_AMP]=""
 )
 
-# 1) baseline × dataset 覆盖（只保留 WPMixer）
+# 1) baseline × dataset 覆盖（只写与全局不同的）
 declare -A BD
+BD["PatchTST|ETTh1|ELAYERS"]="1"
+BD["PatchTST|ETTh1|DLAYERS"]="1"
+BD["PatchTST|ETTh1|FACTOR"]="3"
+BD["PatchTST|ETTh2|ELAYERS"]="3"
+BD["PatchTST|ETTh2|DLAYERS"]="1"
+BD["PatchTST|ETTh2|FACTOR"]="3"
+BD["PatchTST|ETTh2|NHEADS"]="4"
+BD["PatchTST|ETTm1|DLAYERS"]="1"
+BD["PatchTST|ETTm1|FACTOR"]="3"
+BD["PatchTST|ETTm2|DLAYERS"]="1"
+BD["PatchTST|ETTm2|FACTOR"]="3"
+BD["DLinear|ETTh1|ELAYERS"]="2"
+BD["DLinear|ETTh1|DLAYERS"]="1"
+BD["DLinear|ETTh1|FACTOR"]="3"
+BD["TimeXer|ETTh1|FACTOR"]="3"
+BD["TimeXer|ETTh2|FACTOR"]="3"
+BD["TimeXer|ETTh2|DFF"]="1024"
+BD["TimeXer|ETTm1|ELAYERS"]="1"
+BD["TimeXer|ETTm1|FACTOR"]="3"
+BD["TimeXer|ETTm1|DMODEL"]="256"
+BD["TimeXer|ETTm1|BATCH"]="4"
+BD["TimeXer|ETTm2|ELAYERS"]="1"
+BD["TimeXer|ETTm2|FACTOR"]="3"
+BD["TimesNet|ETTh1|ELAYERS"]="2"
+BD["TimesNet|ETTh1|DLAYERS"]="1"
+BD["TimesNet|ETTh1|FACTOR"]="3"
+BD["TimesNet|ETTh1|DMODEL"]="16"
+BD["TimesNet|ETTh1|DFF"]="32"
+BD["TimesNet|ETTh1|TOP_K"]="5"
+BD["TimesNet|ETTh2|ELAYERS"]="2"
+BD["TimesNet|ETTh2|DLAYERS"]="1"
+BD["TimesNet|ETTh2|FACTOR"]="3"
+BD["TimesNet|ETTh2|DMODEL"]="32"
+BD["TimesNet|ETTh2|DFF"]="32"
+BD["TimesNet|ETTh2|TOP_K"]="5"
+BD["TimesNet|ETTm1|FACTOR"]="3"
+BD["TimesNet|ETTm2|FACTOR"]="3"
 
-# WPMixer@ETTh1：官方脚本的共同参数
-BD["WPMixer|ETTh1|SEQ_LEN"]="512"
-BD["WPMixer|ETTh1|LABEL_LEN"]="0"
-BD["WPMixer|ETTh1|BATCH"]="256"
-BD["WPMixer|ETTh1|EPOCHS"]="30"
-BD["WPMixer|ETTh1|LRADJ"]="type3"
-BD["WPMixer|ETTh1|PATIENCE"]="12"
+BD["TimeXer|Weather|FACTOR"]="3"
+BD["TimeXer|Weather|BATCH"]="4"
+BD["TimesNet|Weather|FACTOR"]="3"
+BD["TimesNet|Weather|DMODEL"]="32"
+BD["TimesNet|Weather|DFF"]="32"
+BD["PatchTST|Weather|FACTOR"]="3"
+BD["PatchTST|Weather|EPOCHS"]="3"
 
-BD["WPMixer|ETTh2|SEQ_LEN"]="512"
-BD["WPMixer|ETTh2|LABEL_LEN"]="0"
-BD["WPMixer|ETTh2|BATCH"]="256"
-BD["WPMixer|ETTh2|EPOCHS"]="30"
-BD["WPMixer|ETTh2|LRADJ"]="type3"
-BD["WPMixer|ETTh2|PATIENCE"]="12"
+BD["TimeXer|Traffic|LR"]="1e-3" 
+BD["TimeXer|Traffic|BATCH"]="16"
+BD["TimeXer|Traffic|FACTOR"]="3"
+BD["TimeXer|Traffic|DFF"]="512"
+BD["TimeXer|Traffic|DMODEL"]="512"  
+BD["TimesNet|Traffic|FACTOR"]="3" 
+BD["TimesNet|Traffic|DFF"]="512"
+BD["PatchTST|Traffic|FACTOR"]="3"
+BD["PatchTST|Traffic|DFF"]="512"
+BD["PatchTST|Traffic|BATCH"]="4"
 
-BD["WPMixer|ETTm1|SEQ_LEN"]="512"
-BD["WPMixer|ETTm1|LABEL_LEN"]="0"
-BD["WPMixer|ETTm1|BATCH"]="256"
-BD["WPMixer|ETTm1|EPOCHS"]="80"
-BD["WPMixer|ETTm1|DROPOUT"]="0.4"
-BD["WPMixer|ETTm1|PATCH_LEN"]="48"
-BD["WPMixer|ETTm1|LRADJ"]="type3"
-BD["WPMixer|ETTm1|PATIENCE"]="12"
+BD["DLinear|Electricity|FACTOR"]="3"
+BD["PatchTST|Electricity|FACTOR"]="3"
+BD["PatchTST|Electricity|BATCH"]="16"
+BD["TimesNet|Electricity|FACTOR"]="3"
+BD["TimesNet|Electricity|DMODEL"]="256"
+BD["TimesNet|Electricity|DFF"]="512"
+BD["TimeXer|Electricity|FACTOR"]="3"
+BD["TimeXer|Electricity|BATCH"]="4"
 
-BD["WPMixer|ETTm2|SEQ_LEN"]="512"
-BD["WPMixer|ETTm2|LABEL_LEN"]="0"
-BD["WPMixer|ETTm2|DMODEL"]="256"
-BD["WPMixer|ETTm2|BATCH"]="256"
-BD["WPMixer|ETTm2|EPOCHS"]="80"
-BD["WPMixer|ETTm2|PATCH_LEN"]="48"
-BD["WPMixer|ETTm2|LRADJ"]="type3"
-BD["WPMixer|ETTm2|PATIENCE"]="12"
 
-BD["WPMixer|Weather|SEQ_LEN"]="512"
-BD["WPMixer|Weather|LABEL_LEN"]="0"
-BD["WPMixer|Weather|EPOCHS"]="60"
-BD["WPMixer|Weather|DROPOUT"]="0.4"
-BD["WPMixer|Weather|LRADJ"]="type3"
-BD["WPMixer|Weather|PATIENCE"]="12"
-
-BD["WPMixer|Electricity|SEQ_LEN"]="512"
-BD["WPMixer|Electricity|LABEL_LEN"]="0"
-BD["WPMixer|Electricity|DMODEL"]="32"
-BD["WPMixer|Electricity|EPOCHS"]="100"
-BD["WPMixer|Electricity|LRADJ"]="type3"
-BD["WPMixer|Electricity|PATIENCE"]="12"
-
-BD["WPMixer|Traffic|SEQ_LEN"]="1200"
-BD["WPMixer|Traffic|LABEL_LEN"]="0"
-BD["WPMixer|Traffic|BATCH"]="16"
-BD["WPMixer|Traffic|LRADJ"]="type3"
-BD["WPMixer|Traffic|PATIENCE"]="12"
-
-# 2) baseline × dataset × horizon 覆盖（只保留 WPMixer）
+# 2) baseline × dataset × horizon 覆盖（只写确实因 horizon 不同而变化的项）
 declare -A BDH
+BDH["PatchTST|ETTh1|96|NHEADS"]="2"
+BDH["PatchTST|ETTh1|192|NHEADS"]="8"
+BDH["PatchTST|ETTh1|336|NHEADS"]="8"
+BDH["PatchTST|ETTh1|720|NHEADS"]="16"
+BDH["PatchTST|ETTm1|96|ELAYERS"]="1"
+BDH["PatchTST|ETTm1|96|NHEADS"]="2"
+BDH["PatchTST|ETTm1|96|BATCH"]="32"
+BDH["PatchTST|ETTm1|192|ELAYERS"]="3"
+BDH["PatchTST|ETTm1|192|NHEADS"]="2"
+BDH["PatchTST|ETTm1|192|BATCH"]="128"
+BDH["PatchTST|ETTm1|336|ELAYERS"]="1"
+BDH["PatchTST|ETTm1|336|NHEADS"]="4"
+BDH["PatchTST|ETTm1|336|BATCH"]="128"
+BDH["PatchTST|ETTm1|720|ELAYERS"]="3"
+BDH["PatchTST|ETTm1|720|NHEADS"]="4"
+BDH["PatchTST|ETTm1|720|BATCH"]="128"
+BDH["PatchTST|ETTm2|96|ELAYERS"]="3"
+BDH["PatchTST|ETTm2|96|NHEADS"]="16"
+BDH["PatchTST|ETTm2|96|BATCH"]="32"
+BDH["PatchTST|ETTm2|192|ELAYERS"]="3"
+BDH["PatchTST|ETTm2|192|NHEADS"]="2"
+BDH["PatchTST|ETTm2|192|BATCH"]="128"
+BDH["PatchTST|ETTm2|336|ELAYERS"]="1"
+BDH["PatchTST|ETTm2|336|NHEADS"]="4"
+BDH["PatchTST|ETTm2|336|BATCH"]="32"
+BDH["PatchTST|ETTm2|720|ELAYERS"]="3"
+BDH["PatchTST|ETTm2|720|NHEADS"]="4"
+BDH["PatchTST|ETTm2|720|BATCH"]="128"
+BDH["TimeXer|ETTh1|96|ELAYERS"]="1"
+BDH["TimeXer|ETTh1|96|DMODEL"]="256"
+BDH["TimeXer|ETTh1|96|BATCH"]="4"
+BDH["TimeXer|ETTh1|192|ELAYERS"]="2"
+BDH["TimeXer|ETTh1|192|DMODEL"]="128"
+BDH["TimeXer|ETTh1|192|BATCH"]="4"
+BDH["TimeXer|ETTh1|336|ELAYERS"]="1"
+BDH["TimeXer|ETTh1|336|DMODEL"]="512"
+BDH["TimeXer|ETTh1|336|DFF"]="1024"
+BDH["TimeXer|ETTh1|336|BATCH"]="16"
+BDH["TimeXer|ETTh1|720|ELAYERS"]="1"
+BDH["TimeXer|ETTh1|720|DMODEL"]="256"
+BDH["TimeXer|ETTh1|720|DFF"]="1024"
+BDH["TimeXer|ETTh1|720|BATCH"]="16"
+BDH["TimeXer|ETTh2|96|ELAYERS"]="1"
+BDH["TimeXer|ETTh2|96|DMODEL"]="256"
+BDH["TimeXer|ETTh2|96|BATCH"]="16"
+BDH["TimeXer|ETTh2|192|ELAYERS"]="1"
+BDH["TimeXer|ETTh2|192|DMODEL"]="256"
+BDH["TimeXer|ETTh2|336|ELAYERS"]="2"
+BDH["TimeXer|ETTh2|336|DMODEL"]="512"
+BDH["TimeXer|ETTh2|336|BATCH"]="4"
+BDH["TimeXer|ETTh2|720|ELAYERS"]="2"
+BDH["TimeXer|ETTh2|720|DMODEL"]="256"
+BDH["TimeXer|ETTh2|720|BATCH"]="16"
+BDH["TimeXer|ETTm1|192|DFF"]="256"
+BDH["TimeXer|ETTm1|336|DFF"]="1024"
+BDH["TimeXer|ETTm1|720|DFF"]="512"
+BDH["TimeXer|ETTm2|96|DMODEL"]="256"
+BDH["TimeXer|ETTm2|192|DMODEL"]="256"
+BDH["TimeXer|ETTm2|192|DFF"]="1024"
+BDH["TimeXer|ETTm2|192|BATCH"]="16"
+BDH["TimeXer|ETTm2|336|DFF"]="1024"
+BDH["TimesNet|ETTm1|96|DMODEL"]="64"
+BDH["TimesNet|ETTm1|96|DFF"]="64"
+BDH["TimesNet|ETTm1|192|DMODEL"]="64"
+BDH["TimesNet|ETTm1|192|DFF"]="64"
+BDH["TimesNet|ETTm1|336|DMODEL"]="16"
+BDH["TimesNet|ETTm1|336|DFF"]="32"
+BDH["TimesNet|ETTm1|336|EPOCHS"]="3"
+BDH["TimesNet|ETTm1|720|DMODEL"]="16"
+BDH["TimesNet|ETTm1|720|DFF"]="32"
+BDH["TimesNet|ETTm2|96|DMODEL"]="32"
+BDH["TimesNet|ETTm2|96|DFF"]="32"
+BDH["TimesNet|ETTm2|192|DMODEL"]="32"
+BDH["TimesNet|ETTm2|192|DFF"]="32"
+BDH["TimesNet|ETTm2|192|EPOCHS"]="1"
+BDH["TimesNet|ETTm2|336|DMODEL"]="32"
+BDH["TimesNet|ETTm2|336|DFF"]="32"
+BDH["TimesNet|ETTm2|720|DMODEL"]="16"
+BDH["TimesNet|ETTm2|720|DFF"]="32"
+BDH["TimesNet|ETTm2|720|EPOCHS"]="1"
 
-# WPMixer@ETTh1：按 horizon 变化的参数
-BDH["WPMixer|ETTh1|96|LR"]="0.000242438"
-BDH["WPMixer|ETTh1|96|DROPOUT"]="0.4"
-BDH["WPMixer|ETTh1|96|DMODEL"]="256"
+BDH["TimeXer|Weather|96|ELAYERS"]="1"
+BDH["TimeXer|Weather|96|DMODEL"]="256"
+BDH["TimeXer|Weather|96|DFF"]="512"
+BDH["TimeXer|Weather|192|ELAYERS"]="3"
+BDH["TimeXer|Weather|192|DMODEL"]="128"
+BDH["TimeXer|Weather|192|DFF"]="1024"
+BDH["TimeXer|Weather|336|ELAYERS"]="1"
+BDH["TimeXer|Weather|336|DMODEL"]="256"
+BDH["TimeXer|Weather|720|ELAYERS"]="1"
+BDH["TimeXer|Weather|720|DMODEL"]="128"
+BDH["TimesNet|Weather|192|EPOCHS"]="1" 
+BDH["TimesNet|Weather|720|EPOCHS"]="1" 
+BDH["PatchTST|Weather|96|NHEADS"]="4"
+BDH["PatchTST|Weather|192|NHEADS"]="16"
+BDH["PatchTST|Weather|336|NHEADS"]="4"
+BDH["PatchTST|Weather|336|BATCH"]="128"
+BDH["PatchTST|Weather|720|NHEADS"]="4"
+BDH["PatchTST|Weather|720|BATCH"]="128"
 
-BDH["WPMixer|ETTh1|192|LR"]="0.000201437"
-BDH["WPMixer|ETTh1|192|DROPOUT"]="0.05"
-BDH["WPMixer|ETTh1|192|DMODEL"]="256"
+BDH["TimeXer|Traffic|96|ELAYERS"]="3"  
+BDH["TimeXer|Traffic|192|ELAYERS"]="3"
 
-BDH["WPMixer|ETTh1|336|LR"]="0.000132929"
-BDH["WPMixer|ETTh1|336|DROPOUT"]="0.0"
-BDH["WPMixer|ETTh1|336|DMODEL"]="256"
+BDH["TimeXer|Electricity|96|ELAYERS"]="4"
+BDH["TimeXer|Electricity|96|DFF"]="512"
+BDH["TimeXer|Electricity|192|ELAYERS"]="3"
+BDH["TimeXer|Electricity|336|ELAYERS"]="4"
+BDH["TimeXer|Electricity|720|ELAYERS"]="3"
 
-BDH["WPMixer|ETTh1|720|LR"]="0.000239762"
-BDH["WPMixer|ETTh1|720|DROPOUT"]="0.2"
-BDH["WPMixer|ETTh1|720|DMODEL"]="128"
-
-BDH["WPMixer|ETTh2|96|LR"]="0.000466278"
-BDH["WPMixer|ETTh2|96|DROPOUT"]="0.0"
-BDH["WPMixer|ETTh2|96|DMODEL"]="256"
-
-BDH["WPMixer|ETTh2|192|LR"]="0.000294929"
-BDH["WPMixer|ETTh2|192|DROPOUT"]="0.0"
-BDH["WPMixer|ETTh2|192|DMODEL"]="256"
-
-BDH["WPMixer|ETTh2|336|LR"]="0.000617476"
-BDH["WPMixer|ETTh2|336|DROPOUT"]="0.1"
-BDH["WPMixer|ETTh2|336|DMODEL"]="128"
-
-BDH["WPMixer|ETTh2|720|LR"]="0.000810205"
-BDH["WPMixer|ETTh2|720|DROPOUT"]="0.4"
-BDH["WPMixer|ETTh2|720|DMODEL"]="128"
-
-BDH["WPMixer|ETTh2|720|DROPOUT"]="0.4"
-BDH["WPMixer|ETTh2|720|DMODEL"]="128"
-
-BDH["WPMixer|ETTm1|96|LR"]="0.001277976"
-BDH["WPMixer|ETTm1|96|DMODEL"]="256"
-
-BDH["WPMixer|ETTm1|192|LR"]="0.002415901"
-BDH["WPMixer|ETTm1|192|DMODEL"]="128"
-
-BDH["WPMixer|ETTm1|336|LR"]="0.001594735"
-BDH["WPMixer|ETTm1|336|DMODEL"]="256"
-
-BDH["WPMixer|ETTm1|720|LR"]="0.002011441"
-BDH["WPMixer|ETTm1|720|DMODEL"]="128"
-
-BDH["WPMixer|ETTm2|96|LR"]="0.00076587"
-BDH["WPMixer|ETTm2|96|DROPOUT"]="0.4"
-
-BDH["WPMixer|ETTm2|192|LR"]="0.000275775"
-BDH["WPMixer|ETTm2|192|DROPOUT"]="0.2"
-
-BDH["WPMixer|ETTm2|336|LR"]="0.000234608"
-BDH["WPMixer|ETTm2|336|DROPOUT"]="0.4"
-
-BDH["WPMixer|ETTm2|720|LR"]="0.001039536"
-BDH["WPMixer|ETTm2|720|DROPOUT"]="0.4"
-
-BDH["WPMixer|Weather|96|LR"]="0.000913333"
-BDH["WPMixer|Weather|96|BATCH"]="32"
-BDH["WPMixer|Weather|96|DMODEL"]="256"
-
-BDH["WPMixer|Weather|192|LR"]="0.001379042"
-BDH["WPMixer|Weather|192|BATCH"]="64"
-BDH["WPMixer|Weather|192|DMODEL"]="128"
-
-BDH["WPMixer|Weather|336|LR"]="0.000607991"
-BDH["WPMixer|Weather|336|BATCH"]="32"
-BDH["WPMixer|Weather|336|DMODEL"]="128"
-
-BDH["WPMixer|Weather|720|LR"]="0.001470479"
-BDH["WPMixer|Weather|720|BATCH"]="128"
-BDH["WPMixer|Weather|720|DMODEL"]="128"
-
-BDH["WPMixer|Electricity|96|LR"]="0.00328086"
-BDH["WPMixer|Electricity|96|DROPOUT"]="0.1"
-
-BDH["WPMixer|Electricity|192|LR"]="0.000493286"
-BDH["WPMixer|Electricity|192|DROPOUT"]="0.1"
-
-BDH["WPMixer|Electricity|336|LR"]="0.002505375"
-BDH["WPMixer|Electricity|336|DROPOUT"]="0.2"
-
-BDH["WPMixer|Electricity|720|LR"]="0.001977516"
-BDH["WPMixer|Electricity|720|DROPOUT"]="0.1"
-
-BDH["WPMixer|Traffic|96|LR"]="0.0010385"
-BDH["WPMixer|Traffic|96|EPOCHS"]="60"
-BDH["WPMixer|Traffic|96|DROPOUT"]="0.05"
-BDH["WPMixer|Traffic|96|DMODEL"]="16"
-
-BDH["WPMixer|Traffic|192|LR"]="0.000567053"
-BDH["WPMixer|Traffic|192|EPOCHS"]="60"
-BDH["WPMixer|Traffic|192|DROPOUT"]="0.05"
-BDH["WPMixer|Traffic|192|DMODEL"]="32"
-
-BDH["WPMixer|Traffic|336|LR"]="0.001026715"
-BDH["WPMixer|Traffic|336|EPOCHS"]="50"
-BDH["WPMixer|Traffic|336|DROPOUT"]="0.0"
-BDH["WPMixer|Traffic|336|DMODEL"]="32"
-
-BDH["WPMixer|Traffic|720|LR"]="0.001496217"
-BDH["WPMixer|Traffic|720|EPOCHS"]="60"
-BDH["WPMixer|Traffic|720|DROPOUT"]="0.05"
-BDH["WPMixer|Traffic|720|DMODEL"]="32"
 
 # 3) 查表函数：horizon 覆盖 > (baseline,dataset) 覆盖 > 全局缺省
-# (这个函数是核心引擎，必须保留)
 getp () {
   local base="$1" ds="$2" h="$3" key="$4"
   local v=""
@@ -226,7 +236,6 @@ getp () {
 }
 
 # ================== 日志 ==================
-# (必须保留)
 TS="$(date +'%Y%m%d_%H%M%S')"
 LOG_DIR="./logs/multi_${TS}"
 mkdir -p "${LOG_DIR}"
@@ -235,7 +244,6 @@ log() { echo "[$(date +'%F %T')] $*" | tee -a "${MASTER_LOG}"; }
 trap 'ecode=$?; [ $ecode -ne 0 ] && log "❌ 脚本异常退出，退出码=${ecode}"; exit $ecode' EXIT
 
 # ================== 单次运行 ==================
-# (这个函数是核心引擎，必须保留，并且保留所有升级后的参数)
 run_with_log () {
   local baseline="$1"   # PatchTST / TimesNet / ...
   local ds="$2"         # 数据集
@@ -248,7 +256,7 @@ run_with_log () {
     data_arg="custom"
   fi
 
-  # —— 取这次要用的超参（查表合并） —— (已升级)
+  # —— 取这次要用的超参（查表合并） —— (已升级，包含所有 GDEF 参数)
   local LRv       ; LRv=$(getp "$baseline" "$ds" "$pred" "LR")
   local BATCHv    ; BATCHv=$(getp "$baseline" "$ds" "$pred" "BATCH")
   local PATIENCEv ; PATIENCEv=$(getp "$baseline" "$ds" "$pred" "PATIENCE")
@@ -273,7 +281,7 @@ run_with_log () {
 
   log "▶️  baseline=${baseline} / ds=${ds} / pred=${pred} (log: ${log_file})"
 
-  # ------- 回显命令 ------- (已升级)
+  # ------- 回显命令 ------- (已修正，使用 ...v 变量)
   {
     echo "CMD @ $(date +'%F %T')"
     cat <<EOF
@@ -318,7 +326,7 @@ python -u run.py \
 EOF
   } | tee -a "${log_file}" >> "${MASTER_LOG}"
 
-  # ------- 真正执行 ------- (已升级)
+  # ------- 真正执行 ------- (已修正，使用 ...v 变量)
   set +e
   python -u run.py \
     --task_name long_term_forecast \
@@ -372,7 +380,6 @@ EOF
 }
 
 # ================== 批量调度 ==================
-# (这个循环现在只会跑 WPMixer on ETTh1 的 4个 pred_len)
 for ds in "${DATASETS[@]}"; do
   for pl in "${PRED_LENS[@]}"; do
     for base in "${BASELINES[@]}"; do

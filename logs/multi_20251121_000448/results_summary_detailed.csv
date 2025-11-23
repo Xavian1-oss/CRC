@@ -1,0 +1,5 @@
+﻿dataset,model,horizon,baseline_mse,baseline_mae,corrected_mse,corrected_mae,filename
+Electricity,timexer,192,0.1572,0.2558,0.1517,0.2485,Electricity_crc_timexer_pl192_dm512.log
+Electricity,patchtst,192,0.1875,0.2797,0.1639,0.2586,Electricity_crc_patchtst_pl192_dm512.log
+Electricity,timesnet,192,0.1897,0.2914,0.1762,0.2787,Electricity_crc_timesnet_pl192_dm256.log
+Electricity,dlinear,192,,,,,Electricity_crc_dlinear_pl192_dm512.log

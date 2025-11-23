@@ -1,7 +1,7 @@
 #!/bin/bash
 #PBS -l select=1:ncpus=8:ngpus=1:mem=92gb
-#PBS -l walltime=1:00:00
-#PBS -N crc_batch_gpu
+#PBS -l walltime=10:00:00
+#PBS -N pir_batch_gpu
 #PBS -j oe
 
 set -euo pipefail
@@ -35,4 +35,4 @@ export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 
 # 5) 跑批处理
-bash ./run_pir_weather.sh
+bash ./run_pir_batch_2.sh

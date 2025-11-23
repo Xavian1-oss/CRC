@@ -4,22 +4,6 @@ set -euo pipefail
 # ================== 基础设置 ==================
 export CUDA_VISIBLE_DEVICES=0
 
-# --- 以下参数由 GDEF 字典统一管理，此处仅为备注 ---
-# SEQ_LEN=96
-# LABEL_LEN=48
-# EPOCHS=50
-# PATIENCE=7
-# BATCH=32
-# LR=1e-3
-# DMODEL=64
-# NHEADS=8
-# ELAYERS=2
-# DLAYERS=1
-# DFF=2048
-# PATCH_LEN=16
-# FACTOR=1
-# MOVING_AVG=25
-
 # --- 以下参数为 GDEF 之外的全局设置 ---
 # USE_DTW=--use_dtw
 Q_VAL=3
@@ -27,8 +11,8 @@ INVERSE=''   # 若要还原尺度评估，设为 '--inverse'
 
 # ================== 想批量跑的组合 ==================
 DATASETS=(Traffic)
-PRED_LENS=(96 192)
-BASELINES=(TimeXer TimesNet PatchTST DLinear)
+PRED_LENS=(336)
+BASELINES=(PatchTST TimesNet TimeXer DLinear)
 
 # ================== 数据集路径与通道数 ==================
 dataset_setup () {
@@ -62,25 +46,184 @@ declare -A GDEF=(
 
 # 1) baseline × dataset 覆盖（只写与全局不同的）
 declare -A BD
+BD["PatchTST|ETTh1|ELAYERS"]="1"
+BD["PatchTST|ETTh1|DLAYERS"]="1"
+BD["PatchTST|ETTh1|FACTOR"]="3"
+BD["PatchTST|ETTh2|ELAYERS"]="3"
+BD["PatchTST|ETTh2|DLAYERS"]="1"
+BD["PatchTST|ETTh2|FACTOR"]="3"
+BD["PatchTST|ETTh2|NHEADS"]="4"
+BD["PatchTST|ETTm1|DLAYERS"]="1"
+BD["PatchTST|ETTm1|FACTOR"]="3"
+BD["PatchTST|ETTm2|DLAYERS"]="1"
+BD["PatchTST|ETTm2|FACTOR"]="3"
+BD["DLinear|ETTh1|ELAYERS"]="2"
+BD["DLinear|ETTh1|DLAYERS"]="1"
+BD["DLinear|ETTh1|FACTOR"]="3"
+BD["TimeXer|ETTh1|FACTOR"]="3"
+BD["TimeXer|ETTh2|FACTOR"]="3"
+BD["TimeXer|ETTh2|DFF"]="1024"
+BD["TimeXer|ETTm1|ELAYERS"]="1"
+BD["TimeXer|ETTm1|FACTOR"]="3"
+BD["TimeXer|ETTm1|DMODEL"]="256"
+BD["TimeXer|ETTm1|BATCH"]="4"
+BD["TimeXer|ETTm2|ELAYERS"]="1"
+BD["TimeXer|ETTm2|FACTOR"]="3"
+BD["TimesNet|ETTh1|ELAYERS"]="2"
+BD["TimesNet|ETTh1|DLAYERS"]="1"
+BD["TimesNet|ETTh1|FACTOR"]="3"
+BD["TimesNet|ETTh1|DMODEL"]="16"
+BD["TimesNet|ETTh1|DFF"]="32"
+BD["TimesNet|ETTh1|TOP_K"]="5"
+BD["TimesNet|ETTh2|ELAYERS"]="2"
+BD["TimesNet|ETTh2|DLAYERS"]="1"
+BD["TimesNet|ETTh2|FACTOR"]="3"
+BD["TimesNet|ETTh2|DMODEL"]="32"
+BD["TimesNet|ETTh2|DFF"]="32"
+BD["TimesNet|ETTh2|TOP_K"]="5"
+BD["TimesNet|ETTm1|FACTOR"]="3"
+BD["TimesNet|ETTm2|FACTOR"]="3"
+
+BD["TimeXer|Weather|FACTOR"]="3"
+BD["TimeXer|Weather|BATCH"]="4"
+BD["TimesNet|Weather|FACTOR"]="3"
+BD["TimesNet|Weather|DMODEL"]="32"
+BD["TimesNet|Weather|DFF"]="32"
+BD["PatchTST|Weather|FACTOR"]="3"
+BD["PatchTST|Weather|EPOCHS"]="3"
 
 BD["TimeXer|Traffic|LR"]="1e-3" 
 BD["TimeXer|Traffic|BATCH"]="16"
 BD["TimeXer|Traffic|FACTOR"]="3"
 BD["TimeXer|Traffic|DFF"]="512"
 BD["TimeXer|Traffic|DMODEL"]="512"  
-
 BD["TimesNet|Traffic|FACTOR"]="3" 
 BD["TimesNet|Traffic|DFF"]="512"
-
 BD["PatchTST|Traffic|FACTOR"]="3"
 BD["PatchTST|Traffic|DFF"]="512"
 BD["PatchTST|Traffic|BATCH"]="4"
 
+BD["DLinear|Electricity|FACTOR"]="3"
+BD["PatchTST|Electricity|FACTOR"]="3"
+BD["PatchTST|Electricity|BATCH"]="16"
+BD["TimesNet|Electricity|FACTOR"]="3"
+BD["TimesNet|Electricity|DMODEL"]="256"
+BD["TimesNet|Electricity|DFF"]="512"
+BD["TimeXer|Electricity|FACTOR"]="3"
+BD["TimeXer|Electricity|BATCH"]="4"
+
+
 # 2) baseline × dataset × horizon 覆盖（只写确实因 horizon 不同而变化的项）
 declare -A BDH
+BDH["PatchTST|ETTh1|96|NHEADS"]="2"
+BDH["PatchTST|ETTh1|192|NHEADS"]="8"
+BDH["PatchTST|ETTh1|336|NHEADS"]="8"
+BDH["PatchTST|ETTh1|720|NHEADS"]="16"
+BDH["PatchTST|ETTm1|96|ELAYERS"]="1"
+BDH["PatchTST|ETTm1|96|NHEADS"]="2"
+BDH["PatchTST|ETTm1|96|BATCH"]="32"
+BDH["PatchTST|ETTm1|192|ELAYERS"]="3"
+BDH["PatchTST|ETTm1|192|NHEADS"]="2"
+BDH["PatchTST|ETTm1|192|BATCH"]="128"
+BDH["PatchTST|ETTm1|336|ELAYERS"]="1"
+BDH["PatchTST|ETTm1|336|NHEADS"]="4"
+BDH["PatchTST|ETTm1|336|BATCH"]="128"
+BDH["PatchTST|ETTm1|720|ELAYERS"]="3"
+BDH["PatchTST|ETTm1|720|NHEADS"]="4"
+BDH["PatchTST|ETTm1|720|BATCH"]="128"
+BDH["PatchTST|ETTm2|96|ELAYERS"]="3"
+BDH["PatchTST|ETTm2|96|NHEADS"]="16"
+BDH["PatchTST|ETTm2|96|BATCH"]="32"
+BDH["PatchTST|ETTm2|192|ELAYERS"]="3"
+BDH["PatchTST|ETTm2|192|NHEADS"]="2"
+BDH["PatchTST|ETTm2|192|BATCH"]="128"
+BDH["PatchTST|ETTm2|336|ELAYERS"]="1"
+BDH["PatchTST|ETTm2|336|NHEADS"]="4"
+BDH["PatchTST|ETTm2|336|BATCH"]="32"
+BDH["PatchTST|ETTm2|720|ELAYERS"]="3"
+BDH["PatchTST|ETTm2|720|NHEADS"]="4"
+BDH["PatchTST|ETTm2|720|BATCH"]="128"
+BDH["TimeXer|ETTh1|96|ELAYERS"]="1"
+BDH["TimeXer|ETTh1|96|DMODEL"]="256"
+BDH["TimeXer|ETTh1|96|BATCH"]="4"
+BDH["TimeXer|ETTh1|192|ELAYERS"]="2"
+BDH["TimeXer|ETTh1|192|DMODEL"]="128"
+BDH["TimeXer|ETTh1|192|BATCH"]="4"
+BDH["TimeXer|ETTh1|336|ELAYERS"]="1"
+BDH["TimeXer|ETTh1|336|DMODEL"]="512"
+BDH["TimeXer|ETTh1|336|DFF"]="1024"
+BDH["TimeXer|ETTh1|336|BATCH"]="16"
+BDH["TimeXer|ETTh1|720|ELAYERS"]="1"
+BDH["TimeXer|ETTh1|720|DMODEL"]="256"
+BDH["TimeXer|ETTh1|720|DFF"]="1024"
+BDH["TimeXer|ETTh1|720|BATCH"]="16"
+BDH["TimeXer|ETTh2|96|ELAYERS"]="1"
+BDH["TimeXer|ETTh2|96|DMODEL"]="256"
+BDH["TimeXer|ETTh2|96|BATCH"]="16"
+BDH["TimeXer|ETTh2|192|ELAYERS"]="1"
+BDH["TimeXer|ETTh2|192|DMODEL"]="256"
+BDH["TimeXer|ETTh2|336|ELAYERS"]="2"
+BDH["TimeXer|ETTh2|336|DMODEL"]="512"
+BDH["TimeXer|ETTh2|336|BATCH"]="4"
+BDH["TimeXer|ETTh2|720|ELAYERS"]="2"
+BDH["TimeXer|ETTh2|720|DMODEL"]="256"
+BDH["TimeXer|ETTh2|720|BATCH"]="16"
+BDH["TimeXer|ETTm1|192|DFF"]="256"
+BDH["TimeXer|ETTm1|336|DFF"]="1024"
+BDH["TimeXer|ETTm1|720|DFF"]="512"
+BDH["TimeXer|ETTm2|96|DMODEL"]="256"
+BDH["TimeXer|ETTm2|192|DMODEL"]="256"
+BDH["TimeXer|ETTm2|192|DFF"]="1024"
+BDH["TimeXer|ETTm2|192|BATCH"]="16"
+BDH["TimeXer|ETTm2|336|DFF"]="1024"
+BDH["TimesNet|ETTm1|96|DMODEL"]="64"
+BDH["TimesNet|ETTm1|96|DFF"]="64"
+BDH["TimesNet|ETTm1|192|DMODEL"]="64"
+BDH["TimesNet|ETTm1|192|DFF"]="64"
+BDH["TimesNet|ETTm1|336|DMODEL"]="16"
+BDH["TimesNet|ETTm1|336|DFF"]="32"
+BDH["TimesNet|ETTm1|336|EPOCHS"]="3"
+BDH["TimesNet|ETTm1|720|DMODEL"]="16"
+BDH["TimesNet|ETTm1|720|DFF"]="32"
+BDH["TimesNet|ETTm2|96|DMODEL"]="32"
+BDH["TimesNet|ETTm2|96|DFF"]="32"
+BDH["TimesNet|ETTm2|192|DMODEL"]="32"
+BDH["TimesNet|ETTm2|192|DFF"]="32"
+BDH["TimesNet|ETTm2|192|EPOCHS"]="1"
+BDH["TimesNet|ETTm2|336|DMODEL"]="32"
+BDH["TimesNet|ETTm2|336|DFF"]="32"
+BDH["TimesNet|ETTm2|720|DMODEL"]="16"
+BDH["TimesNet|ETTm2|720|DFF"]="32"
+BDH["TimesNet|ETTm2|720|EPOCHS"]="1"
+
+BDH["TimeXer|Weather|96|ELAYERS"]="1"
+BDH["TimeXer|Weather|96|DMODEL"]="256"
+BDH["TimeXer|Weather|96|DFF"]="512"
+BDH["TimeXer|Weather|192|ELAYERS"]="3"
+BDH["TimeXer|Weather|192|DMODEL"]="128"
+BDH["TimeXer|Weather|192|DFF"]="1024"
+BDH["TimeXer|Weather|336|ELAYERS"]="1"
+BDH["TimeXer|Weather|336|DMODEL"]="256"
+BDH["TimeXer|Weather|720|ELAYERS"]="1"
+BDH["TimeXer|Weather|720|DMODEL"]="128"
+BDH["TimesNet|Weather|192|EPOCHS"]="1" 
+BDH["TimesNet|Weather|720|EPOCHS"]="1" 
+BDH["PatchTST|Weather|96|NHEADS"]="4"
+BDH["PatchTST|Weather|192|NHEADS"]="16"
+BDH["PatchTST|Weather|336|NHEADS"]="4"
+BDH["PatchTST|Weather|336|BATCH"]="128"
+BDH["PatchTST|Weather|720|NHEADS"]="4"
+BDH["PatchTST|Weather|720|BATCH"]="128"
 
 BDH["TimeXer|Traffic|96|ELAYERS"]="3"  
 BDH["TimeXer|Traffic|192|ELAYERS"]="3"
+
+BDH["TimeXer|Electricity|96|ELAYERS"]="4"
+BDH["TimeXer|Electricity|96|DFF"]="512"
+BDH["TimeXer|Electricity|192|ELAYERS"]="3"
+BDH["TimeXer|Electricity|336|ELAYERS"]="4"
+BDH["TimeXer|Electricity|720|ELAYERS"]="3"
+
 
 # 3) 查表函数：horizon 覆盖 > (baseline,dataset) 覆盖 > 全局缺省
 getp () {

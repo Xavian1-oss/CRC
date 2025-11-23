@@ -33,6 +33,7 @@ if __name__ == '__main__':
                         help='model name, options: [Autoformer, Transformer, TimesNet]')
     parser.add_argument('--checkpoints', type=str, default='./checkpoints/')
 
+    # PIR specific parameters
     parser.add_argument('--backbone', type=str, required=False, default='PatchTST')
     parser.add_argument('--bakcbone_checkpoints', type=str, required=False, default='./checkpoints/backbone/')
     parser.add_argument('--load_pretrained_backbone', type=int, default=2)
@@ -47,6 +48,7 @@ if __name__ == '__main__':
     parser.add_argument('--retrieval_stride', type=int, default=1)
     parser.add_argument('--including_time_features', type=int, default=1)
 
+    # batch size and data loader
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--percent', type=int, default=100)
 
@@ -67,6 +69,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--seasonal_patterns', type=str, default='Monthly', help='subset for M4')
     parser.add_argument('--inverse', action='store_true', help='inverse output data', default=False)
+    
     # model define
     parser.add_argument('--top_k', type=int, default=5, help='for TimesBlock')
     parser.add_argument('--num_kernels', type=int, default=6, help='for Inception')

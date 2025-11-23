@@ -1,0 +1,5 @@
+﻿dataset,model,horizon,corrected_mse,corrected_mae,baseline_mse,baseline_mae,filename
+Electricity,PIR_dlinear,720,0.238,0.314,,,PIR_Electricity_dlinear_pl720_dm512_sl96.log
+Electricity,PIR_timesnet,720,0.219,0.316,,,PIR_Electricity_timesnet_pl720_dm256_sl96.log
+Electricity,PIR_patchtst,720,0.224,0.305,,,PIR_Electricity_patchtst_pl720_dm512_sl96.log
+Electricity,PIR_timexer,720,0.199,0.295,,,PIR_Electricity_timexer_pl720_dm512_sl96.log

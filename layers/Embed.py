@@ -93,17 +93,32 @@ class TemporalEmbedding(nn.Module):
         return hour_x + weekday_x + day_x + month_x + minute_x
 
 
+# class TimeFeatureEmbedding(nn.Module):
+#     def __init__(self, d_model, embed_type='timeF', freq='h'):
+#         super(TimeFeatureEmbedding, self).__init__()
+
+#         freq_map = {'h': 4, 't': 5, 's': 6,
+#                     'm': 1, 'a': 1, 'w': 2, 'd': 3, 'b': 3}
+#         d_inp = freq_map[freq]
+#         self.embed = nn.Linear(d_inp, d_model, bias=False)
+
+#     def forward(self, x):
+#         return self.embed(x)
+
+# fit pir
 class TimeFeatureEmbedding(nn.Module):
     def __init__(self, d_model, embed_type='timeF', freq='h'):
         super(TimeFeatureEmbedding, self).__init__()
-
-        freq_map = {'h': 4, 't': 5, 's': 6,
-                    'm': 1, 'a': 1, 'w': 2, 'd': 3, 'b': 3}
-        d_inp = freq_map[freq]
-        self.embed = nn.Linear(d_inp, d_model, bias=False)
+        self.d_model = d_model
+        self.embed = None  # 延迟初始化
 
     def forward(self, x):
+        # x shape: [B, T, d_inp_actual]
+        if self.embed is None:
+            d_inp = x.size(-1)   # 动态获取输入维度
+            self.embed = nn.Linear(d_inp, self.d_model, bias=False).to(x.device)
         return self.embed(x)
+
 
 
 class DataEmbedding(nn.Module):
