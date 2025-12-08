@@ -1,0 +1,2 @@
+﻿dataset,model,horizon,baseline_mse,baseline_mae,corrected_mse,corrected_mae,filename
+Traffic,timexer,192,0.4587,0.2761,0.4558,0.2698,Traffic_crc_timexer_pl192_dm256.log

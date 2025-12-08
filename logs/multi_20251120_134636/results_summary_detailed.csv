@@ -1,5 +1,0 @@
-﻿dataset,model,horizon,baseline_mse,baseline_mae,corrected_mse,corrected_mae,filename
-Traffic,dlinear,96,0.6965,0.4287,0.4889,0.3084,Traffic_crc_dlinear_pl96_dm512.log
-Traffic,timesnet,96,0.5913,0.316,0.5571,0.2972,Traffic_crc_timesnet_pl96_dm512.log
-Traffic,patchtst,96,0.4583,0.2985,0.4298,0.2808,Traffic_crc_patchtst_pl96_dm512.log
-Traffic,timexer,96,0.4277,0.2715,0.4221,0.2641,Traffic_crc_timexer_pl96_dm512.log

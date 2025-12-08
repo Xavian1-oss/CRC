@@ -12,7 +12,7 @@ INVERSE=''   # 若要还原尺度评估，设为 '--inverse'
 # ================== 想批量跑的组合 ==================
 DATASETS=(Traffic)
 PRED_LENS=(720)
-BASELINES=(PatchTST TimesNet TimeXer DLinear)
+BASELINES=(DLinear)
 
 # ================== 数据集路径与通道数 ==================
 dataset_setup () {
@@ -33,8 +33,8 @@ dataset_setup () {
 # ================== 三层默认 + 查表覆盖 ==================
 # 0) 全局缺省 (与 run.py 的 argparse default 保持一致)
 declare -A GDEF=(
-  [LR]="1e-4" [BATCH]="32" [PATIENCE]="3"
-  [DMODEL]="512" [NHEADS]="8" [ELAYERS]="2" [DLAYERS]="1" [DFF]="2048"
+  [LR]="1e-4" [BATCH]="4" [PATIENCE]="3"
+  [DMODEL]="256" [NHEADS]="8" [ELAYERS]="2" [DLAYERS]="1" [DFF]="2048"
   [PATCH_LEN]="16" [FACTOR]="1" [TOP_K]="5" [MOVING_AVG]="25"
   [SEQ_LEN]="96"
   [LABEL_LEN]="48"
@@ -96,7 +96,7 @@ BD["TimeXer|Traffic|LR"]="1e-3"
 BD["TimeXer|Traffic|BATCH"]="16"
 BD["TimeXer|Traffic|FACTOR"]="3"
 BD["TimeXer|Traffic|DFF"]="512"
-BD["TimeXer|Traffic|DMODEL"]="512"  
+BD["TimeXer|Traffic|DMODEL"]="256"  
 BD["TimesNet|Traffic|FACTOR"]="3" 
 BD["TimesNet|Traffic|DFF"]="512"
 BD["PatchTST|Traffic|FACTOR"]="3"

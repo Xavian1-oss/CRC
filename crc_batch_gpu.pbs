@@ -35,4 +35,4 @@ export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 
 # 5) 跑批处理
-bash ./run_crc_batch_2_720.sh
+bash ./run_crc_batch_192.sh

@@ -12,7 +12,7 @@ INVERSE=''   # 若要还原尺度评估，设为 '--inverse'
 # ================== 想批量跑的组合 ==================
 DATASETS=(Electricity)
 PRED_LENS=(192)
-BASELINES=(PatchTST TimesNet TimeXer DLinear)
+BASELINES=(DLinear)
 
 # ================== 数据集路径与通道数 ==================
 dataset_setup () {

@@ -23,9 +23,65 @@ import seaborn as sns
 
 warnings.filterwarnings('ignore')
 
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
+def visualize_clean_temporal_heatmap(
+    dyn_series: np.ndarray, 
+    edge_index: np.ndarray, 
+    sample_rate: int = 10, # 关键参数：每 10 个时间窗口取一个平均值
+    top_k_edges: int = 15,
+    save_dir: str = None
+):
+    B, num_edges = dyn_series.shape
+    
+    # 1. 找出 Top K 条边
+    avg_strengths = np.mean(np.abs(dyn_series), axis=0)
+    top_k_indices = np.argsort(-avg_strengths)[:top_k_edges]
+    
+    # 提取 Top K 边的动态序列
+    raw_data = dyn_series[:, top_k_indices].T # (Top_K, B)
+    
+    # 2. 降采样/平滑数据
+    # 使用 np.mean 对时间维度进行分块平均
+    num_samples = raw_data.shape[1] // sample_rate
+    if num_samples == 0:
+        return # 数据太少，无法降采样
 
+    # 将数据重塑为 (Top_K, num_samples, sample_rate) 并取平均
+    smoothed_data = raw_data[:, :num_samples * sample_rate].reshape(
+        top_k_edges, num_samples, sample_rate
+    ).mean(axis=2) # (Top_K, num_samples)
+    
+    # 3. 创建 Y 轴标签
+    edge_labels = []
+    for edge_idx in top_k_indices:
+        j, i = edge_index[0, edge_idx], edge_index[1, edge_idx]
+        edge_labels.append(f"{j} -> {i}")
+
+    figsize = (16, max(6, top_k_edges / 3)) 
+    plt.figure(figsize=figsize)
+    
+    # 绘制降噪后的热力图
+    sns.heatmap(
+        smoothed_data,
+        yticklabels=edge_labels,
+        cmap='RdBu_r',
+        center=0,
+        annot=False,
+        # X 轴标签只在关键点显示，降低密度
+        xticklabels=[str(int(t * sample_rate)) for t in range(num_samples) if t % (num_samples // 15) == 0],
+        cbar_kws={'label': 'Smoothed Causal Strength (αj→i)'}
+    )
+    
+    plt.xlabel("Validation Window Index (Time) [Averaged over 10 steps]", fontsize=10)
+    plt.ylabel(f"Top {top_k_edges} Edges", fontsize=12)
+    plt.title(f"Temporal Heatmap of Dynamic Causal Strength (Smoothed)")
+    
+    plt.yticks(rotation=0, fontsize=8) 
+    plt.tight_layout()
+    
+    if save_dir:
+        save_path = os.path.join(save_dir, "temporal_causal_heatmap_clean.png")
+        plt.savefig(save_path, dpi=300)
+    plt.close()
 
 def visualize_spatial_causal_heatmap(S, node_names=None, save_dir=None, tag="val"):
     """
@@ -226,11 +282,23 @@ class Exp_CRC(Exp_Long_Term_Forecast):
         print("[Viz] 估计空间因果矩阵 S (j→i) 并可视化 ...")
         viz_dir = os.path.join('./results', setting, 'viz_train')
         os.makedirs(viz_dir, exist_ok=True)
-        S_val = pre_encoder.encoder.estimate_spatial_causality_matrix(W_vl, batch_size=256)  # (N,N)
-        np.save(os.path.join(viz_dir, 'S_val.npy'), S_val)
+        # S_val = pre_encoder.encoder.estimate_spatial_causality_matrix(W_vl, batch_size=256)  # (N,N)
+        # np.save(os.path.join(viz_dir, 'S_val.npy'), S_val)
+        # 展示动态序列
+        S_val, dyn_series_val = pre_encoder.encoder.estimate_spatial_causality_matrix(
+            W_vl, batch_size=256, 
+            return_series=True  
+        )  
+        np.save(os.path.join(viz_dir, 'S_val_dynamic_series.npy'), dyn_series_val)
         node_names_list = [f"N{i}" for i in range(S_val.shape[0])]
-        visualize_spatial_causal_heatmap(S_val, node_names=node_names_list, save_dir=viz_dir, tag="val")
-
+        visualize_spatial_causal_heatmap(S_val, node_names=node_names_list, save_dir=viz_dir, tag="val_avg")
+        visualize_clean_temporal_heatmap(
+            dyn_series=dyn_series_val, 
+            edge_index=pre_encoder.encoder.edge_index.cpu().numpy(), 
+            sample_rate=10, 
+            top_k_edges=15, 
+            save_dir=viz_dir
+        )
         print("\n>>>>>>> CRC 训练流程全部完成 <<<<<<<")
         return self.hybrid_corrector
 
