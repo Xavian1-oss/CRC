@@ -11,8 +11,8 @@ INVERSE=''   # 若要还原尺度评估，设为 '--inverse'
 
 # ================== 想批量跑的组合 ==================
 DATASETS=(Weather) # 用来测试画图功能
-PRED_LENS=(96 192 336 720)
-BASELINES=(PatchTST TimesNet TimeXer DLinear)
+PRED_LENS=(96)
+BASELINES=(TimesNet)
 
 # ================== 数据集路径与通道数 ==================
 dataset_setup () {

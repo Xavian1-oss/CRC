@@ -23,63 +23,100 @@ import seaborn as sns
 
 warnings.filterwarnings('ignore')
 
-def visualize_clean_temporal_heatmap(
+def visualize_dynamic_spatial_causality_composite(
     dyn_series: np.ndarray, 
     edge_index: np.ndarray, 
-    sample_rate: int = 10, # 关键参数：每 10 个时间窗口取一个平均值
-    top_k_edges: int = 15,
+    N: int, 
+    num_snapshots: int = 4,   # 核心参数：要展示的快照数量
+    sample_stride: int = 100, # 核心参数：快照之间的时间间隔
     save_dir: str = None
 ):
-    B, num_edges = dyn_series.shape
+    """
+    基于动态边强度序列，生成包含多个子图的复合空间因果矩阵图。
+    """
+    B, M = dyn_series.shape
     
-    # 1. 找出 Top K 条边
-    avg_strengths = np.mean(np.abs(dyn_series), axis=0)
-    top_k_indices = np.argsort(-avg_strengths)[:top_k_edges]
+    # 1. 确定要采样的索引
+    # 确保索引不超过 B
+    sample_indices = np.arange(0, B, sample_stride)
+    # 只取前 num_snapshots 个，如果不够则全部取
+    sample_indices = sample_indices[:num_snapshots] 
     
-    # 提取 Top K 边的动态序列
-    raw_data = dyn_series[:, top_k_indices].T # (Top_K, B)
-    
-    # 2. 降采样/平滑数据
-    # 使用 np.mean 对时间维度进行分块平均
-    num_samples = raw_data.shape[1] // sample_rate
-    if num_samples == 0:
-        return # 数据太少，无法降采样
+    if len(sample_indices) < 2:
+        print("警告: 采样的快照数量不足 2 个，无法有效展示动态变化。")
+        return
 
-    # 将数据重塑为 (Top_K, num_samples, sample_rate) 并取平均
-    smoothed_data = raw_data[:, :num_samples * sample_rate].reshape(
-        top_k_edges, num_samples, sample_rate
-    ).mean(axis=2) # (Top_K, num_samples)
+    # 2. 准备映射关系和标签
+    target_nodes = edge_index[0, :] # i
+    source_nodes = edge_index[1, :] # j
+    node_names = [f"N{i}" for i in range(N)]
     
-    # 3. 创建 Y 轴标签
-    edge_labels = []
-    for edge_idx in top_k_indices:
-        j, i = edge_index[0, edge_idx], edge_index[1, edge_idx]
-        edge_labels.append(f"{j} -> {i}")
-
-    figsize = (16, max(6, top_k_edges / 3)) 
-    plt.figure(figsize=figsize)
+    # 确定全局 VMAX/VMIN 以统一色标
+    global_vmax = np.max(dyn_series)
     
-    # 绘制降噪后的热力图
-    sns.heatmap(
-        smoothed_data,
-        yticklabels=edge_labels,
-        cmap='RdBu_r',
-        center=0,
-        annot=False,
-        # X 轴标签只在关键点显示，降低密度
-        xticklabels=[str(int(t * sample_rate)) for t in range(num_samples) if t % (num_samples // 15) == 0],
-        cbar_kws={'label': 'Smoothed Causal Strength (αj→i)'}
+    # 3. 创建画布和子图
+    # 布局为 1 行 num_snapshots 列
+    # 调整figsize以容纳多个子图和一个共享的色标
+    figsize = (4 * num_snapshots + 2, max(5, N / 3)) # +2 用于色标
+    fig, axes = plt.subplots(
+        1, len(sample_indices), 
+        figsize=figsize, 
+        sharey=True, 
+        gridspec_kw={'wspace': 0.1} # 减少子图间距
     )
     
-    plt.xlabel("Validation Window Index (Time) [Averaged over 10 steps]", fontsize=10)
-    plt.ylabel(f"Top {top_k_edges} Edges", fontsize=12)
-    plt.title(f"Temporal Heatmap of Dynamic Causal Strength (Smoothed)")
+    # 如果只有一个子图，plt.subplots返回的不是数组，需要转换
+    if len(sample_indices) == 1:
+        axes = [axes]
+
+    print(f"将生成包含 {len(sample_indices)} 个子图的复合动态因果矩阵图...")
+
+    for k, t in enumerate(sample_indices):
+        ax = axes[k]
+        current_strengths = dyn_series[t, :]
+        S_t = np.zeros((N, N), dtype=np.float32)
+        
+        # 填充 S_t 矩阵 (S_t[i, j] = strength of j -> i)
+        for i_idx in range(M):
+            i = target_nodes[i_idx]
+            j = source_nodes[i_idx]
+            S_t[i, j] = current_strengths[i_idx]
+        
+        # 4. 绘制热力图
+        # 注意: cbar=False 用于除了最后一个子图外的所有图
+        cbar_bool = (k == len(sample_indices) - 1)
+        
+        sns.heatmap(
+            S_t, 
+            ax=ax,
+            xticklabels=node_names, 
+            yticklabels=node_names if k == 0 else False, # 只有第一张图显示Y轴标签
+            cmap='Reds',
+            vmin=0, vmax=global_vmax, # 统一色标
+            cbar=cbar_bool,           # 只有最后一张图显示色标
+            cbar_kws={'label': 'Causal Strength (αj→i)'}
+        )
+        
+        ax.set_title(f"Window Index {t}", fontsize=10)
+        ax.set_xlabel("Source Node (j)", fontsize=8)
+        
+        # 调整刻度标签，防止重叠
+        ax.set_xticks(ax.get_xticks())
+        ax.set_xticklabels(node_names, rotation=90, fontsize=6)
+        
+        if k == 0:
+             ax.set_ylabel("Target Node (i)", fontsize=8)
+        else:
+             # 确保后续子图的Y轴标签和刻度被隐藏，但共享坐标
+             ax.tick_params(axis='y', length=0)
+             
+    plt.suptitle(f"Dynamic Spatial Causality Matrix Snapshots ({len(sample_indices)} Time Points)", fontsize=14)
+    plt.tight_layout(rect=[0, 0, 1, 0.95]) # 为suptitle留出空间
     
-    plt.yticks(rotation=0, fontsize=8) 
-    plt.tight_layout()
-    
+    # 5. 保存
     if save_dir:
-        save_path = os.path.join(save_dir, "temporal_causal_heatmap_clean.png")
+        save_path = os.path.join(save_dir, "dynamic_causal_composite.png")
+        print(f"Saving composite heatmap to {save_path}")
         plt.savefig(save_path, dpi=300)
     plt.close()
 
@@ -292,13 +329,18 @@ class Exp_CRC(Exp_Long_Term_Forecast):
         np.save(os.path.join(viz_dir, 'S_val_dynamic_series.npy'), dyn_series_val)
         node_names_list = [f"N{i}" for i in range(S_val.shape[0])]
         visualize_spatial_causal_heatmap(S_val, node_names=node_names_list, save_dir=viz_dir, tag="val_avg")
-        visualize_clean_temporal_heatmap(
+
+        N_nodes = S_val.shape[0] 
+
+        visualize_dynamic_spatial_causality_composite(
             dyn_series=dyn_series_val, 
             edge_index=pre_encoder.encoder.edge_index.cpu().numpy(), 
-            sample_rate=10, 
-            top_k_edges=15, 
+            N=N_nodes,
+            num_snapshots=4,     # 论文中展示 4 个快照
+            sample_stride=200,   # 每隔 200 个时间窗口取一个快照
             save_dir=viz_dir
         )
+        
         print("\n>>>>>>> CRC 训练流程全部完成 <<<<<<<")
         return self.hybrid_corrector
 
