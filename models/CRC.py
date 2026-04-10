@@ -485,6 +485,8 @@ class HybridTrainer:
         self.patience, self.max_epochs, self.batch_size = patience, max_epochs, batch_size
         self.use_dir_gate, self.quantile_q, self.improve_eps = use_dir_gate, quantile_q, improve_eps
         self.scales, self.freq_bands, self.use_robust, self.top_m = scales, freq_bands, use_robust, top_m
+        # tau_scale 仅在推理阶段使用，用于整体缩放安全边界 tau；训练阶段始终使用原始 tau_map
+        self.tau_scale: float = 1.0
         self.W_list_t: List[torch.Tensor] = []; self.tau_map = None   # (H,N)
         self.W_blend = None  # (N,H,2)
         self.linear_is_best = None
@@ -642,16 +644,31 @@ class HybridTrainer:
         print("[Hybrid] Blending calibration done.")
 
     # ---- inference ----
-    def predict(self, W: np.ndarray, yhat: np.ndarray):
+    def predict(
+        self,
+        W: np.ndarray,
+        yhat: np.ndarray,
+        return_nl_abs: bool = False,
+        return_clip_mask: bool = False,
+    ):
         Z_aug = self._encode_aug(W)
         Zt = torch.from_numpy(Z_aug).to(self.device)
         yh_t = torch.from_numpy(yhat).to(self.device)
         with torch.no_grad():
             r_lin = self._r_linear(Zt)
             r_delta = self._r_delta(Zt)
-            tau = self.tau_map.unsqueeze(0).expand_as(r_delta)
+            tau = self.tau_map.unsqueeze(0).expand_as(r_delta) * float(self.tau_scale)
+            clip_mask = torch.abs(r_delta) > tau
             r_delta_c = torch.clamp(r_delta, -tau, tau)
             w1 = self.W_blend[:,:,0].permute(1,0).unsqueeze(0)  # (1,H,N)
             w2 = self.W_blend[:,:,1].permute(1,0).unsqueeze(0)
-            y_final = yh_t + w1 * r_lin + w2 * r_delta_c
-        return y_final.cpu().numpy()
+            nl = w2 * r_delta_c
+            y_final = yh_t + w1 * r_lin + nl
+        y_out = y_final.cpu().numpy()
+        if return_nl_abs and return_clip_mask:
+            return y_out, torch.abs(nl).cpu().numpy(), clip_mask.cpu().numpy()
+        if return_nl_abs:
+            return y_out, torch.abs(nl).cpu().numpy()
+        if return_clip_mask:
+            return y_out, clip_mask.cpu().numpy()
+        return y_out

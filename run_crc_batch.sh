@@ -364,6 +364,8 @@ EOF
     --gpu 0 \
     ${USE_DTW:-} ${INVERSE} \
     ${USEAMPv} \
+    --warm_start \
+    --warm_start \
     --q_val "${Q_VAL}" \
     --des "CRC_${baseline}_M_d${DMODELv}" \
     2> >(tee -a "${log_file}" >> "${MASTER_LOG}" >&2) \

@@ -36,7 +36,8 @@ class EarlyStopping:
         self.counter = 0
         self.best_score = None
         self.early_stop = False
-        self.val_loss_min = np.Inf
+        # numpy 2.0 移除了 np.Inf，这里改为 np.inf 保持兼容
+        self.val_loss_min = np.inf
         self.delta = delta
 
     def __call__(self, val_loss, model, path):

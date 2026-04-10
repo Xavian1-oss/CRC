@@ -74,11 +74,39 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         return total_loss
 
     def train(self, setting):
+        path = os.path.join(self.args.checkpoints, setting)
+        best_model_path = os.path.join(path, 'checkpoint.pth')
+
+        # ---- Warm start: if checkpoint exists, try to load and skip training ----
+        if getattr(self.args, 'warm_start', False) and os.path.exists(best_model_path):
+            print(f"[WarmStart] Found existing checkpoint for {setting}, loading from {best_model_path} and skipping training.")
+            ckpt = torch.load(best_model_path, map_location=self.device)
+            try:
+                self.model.load_state_dict(ckpt)
+                return self.model
+            except RuntimeError as e:
+                msg = str(e)
+                # 特判 TimesNet 中 TimeFeatureEmbedding 的延迟初始化：
+                # 旧 checkpoint 中已有 enc_embedding.temporal_embedding.embed.*，
+                # 而新建模型在第一次 forward 之前还没有这个子模块，属于“多余键”但结构上兼容。
+                if 'enc_embedding.temporal_embedding.embed' in msg:
+                    print("[WarmStart] Detected temporal_embedding.embed mismatch only; retrying with strict=False.")
+                    self.model.load_state_dict(ckpt, strict=False)
+                    return self.model
+
+                # 其他 mismatch 视为真正不兼容：删除 checkpoint，进入正常训练流程
+                print(f"[WarmStart] Failed to load checkpoint for {setting} due to mismatch: {e}\n"
+                      f"[WarmStart] Removing incompatible checkpoint and retraining.")
+                try:
+                    os.remove(best_model_path)
+                except OSError:
+                    pass
+
+        # No usable checkpoint to warm start from: proceed with normal training
         train_data, train_loader = self._get_data(flag='train')
         vali_data, vali_loader = self._get_data(flag='val')
         test_data, test_loader = self._get_data(flag='test')
 
-        path = os.path.join(self.args.checkpoints, setting)
         if not os.path.exists(path):
             os.makedirs(path)
 
@@ -160,8 +188,8 @@ class Exp_Long_Term_Forecast(Exp_Basic):
 
             adjust_learning_rate(model_optim, epoch + 1, self.args)
 
-        best_model_path = path + '/' + 'checkpoint.pth'
-        self.model.load_state_dict(torch.load(best_model_path))
+        best_model_path = os.path.join(path, 'checkpoint.pth')
+        self.model.load_state_dict(torch.load(best_model_path, map_location=self.device))
 
         return self.model
 

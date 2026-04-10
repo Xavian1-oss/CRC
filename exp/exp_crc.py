@@ -242,10 +242,90 @@ class Exp_CRC(Exp_Long_Term_Forecast):
 
         baseline_args = deepcopy(self.args)
         baseline_args.model = self.args.baseline_model
-        print(f"正在训练基线模型: {baseline_args.model}...")
+
+        # 为 baseline 构造 dataset-specific 的 setting，避免多个 DATASETS（例如 Electricity/Weather）
+        # 在 data="custom" 时共用同一套 checkpoint，导致维度不匹配
+        if getattr(self.args, 'data', None) != 'custom':
+            dataset_tag = self.args.data
+        else:
+            data_path = getattr(self.args, 'data_path', '')
+            if data_path:
+                dataset_tag = os.path.splitext(os.path.basename(data_path))[0]
+            else:
+                root_path = getattr(self.args, 'root_path', '')
+                if root_path:
+                    dataset_tag = os.path.basename(os.path.normpath(root_path))
+                else:
+                    dataset_tag = 'custom'
+
+        # baseline 的 setting 不依赖 CRC 的验证比例，但会区分不同数据集与输入维度
+        baseline_setting = (
+            f"baseline_{self.args.baseline_model}_{dataset_tag}"
+            f"_pl{self.args.pred_len}_dm{self.args.d_model}_enc{self.args.enc_in}"
+        )
+        baseline_ckpt_dir = os.path.join(self.args.checkpoints, baseline_setting)
+        baseline_ckpt_path = os.path.join(baseline_ckpt_dir, 'checkpoint.pth')
+
         baseline_exp = Exp_Long_Term_Forecast(baseline_args)
-        self.baseline_model = baseline_exp.train(setting + '_baseline')
-        print("基线模型训练完成。")
+
+        # ---- Warm start for baseline: directly load its checkpoint if available ----
+        if getattr(self.args, 'warm_start', False) and os.path.exists(baseline_ckpt_path):
+            print(f"[WarmStart] Found baseline checkpoint at {baseline_ckpt_path}, trying to load and skip baseline training.")
+            ckpt = torch.load(baseline_ckpt_path, map_location=self.device)
+            try:
+                baseline_exp.model.load_state_dict(ckpt)
+                self.baseline_model = baseline_exp.model.to(self.device)
+                print("[WarmStart] Baseline checkpoint loaded successfully.")
+            except RuntimeError as e:
+                msg = str(e)
+                # 同样特判 TimeFeatureEmbedding 的延迟初始化导致的 embed.* 额外参数
+                if 'enc_embedding.temporal_embedding.embed' in msg:
+                    print("[WarmStart] Baseline temporal_embedding.embed mismatch only; retrying with strict=False.")
+                    baseline_exp.model.load_state_dict(ckpt, strict=False)
+                    self.baseline_model = baseline_exp.model.to(self.device)
+                    print("[WarmStart] Baseline checkpoint loaded successfully with relaxed strictness.")
+                else:
+                    # 其他真正不兼容的情况：回退为重新训练并覆盖
+                    print(f"[WarmStart] Failed to load baseline checkpoint due to mismatch: {e}\n"
+                          f"[WarmStart] Retraining baseline model and overwriting checkpoint.")
+                    self.baseline_model = baseline_exp.train(baseline_setting)
+                    print("基线模型训练完成。")
+        else:
+            print(f"正在训练基线模型: {baseline_args.model} (setting={baseline_setting}) ...")
+            self.baseline_model = baseline_exp.train(baseline_setting)
+            print("基线模型训练完成。")
+
+        val_ratio = float(getattr(self.args, 'crc_val_ratio', 1.0))
+        if val_ratio <= 0.0 or val_ratio > 1.0:
+            raise ValueError(f"crc_val_ratio must be in (0,1], got {val_ratio}")
+        val_suffix = int(round(val_ratio * 100))
+        crc_fname = f'crc_corrector_val{val_suffix}.pth'
+        crc_ckpt_dir_arg = getattr(self.args, 'crc_ckpt_dir', None)
+        if crc_ckpt_dir_arg and str(crc_ckpt_dir_arg).strip():
+            crc_ckpt_dir = os.path.normpath(str(crc_ckpt_dir_arg).strip())
+            os.makedirs(crc_ckpt_dir, exist_ok=True)
+            crc_ckpt_path = os.path.join(crc_ckpt_dir, crc_fname)
+        else:
+            crc_ckpt_dir = os.path.join(self.args.checkpoints, setting)
+            os.makedirs(crc_ckpt_dir, exist_ok=True)
+            crc_ckpt_path = os.path.join(crc_ckpt_dir, crc_fname)
+
+        if getattr(self.args, 'crc_skip_retrain', False):
+            if not os.path.isfile(crc_ckpt_path):
+                raise FileNotFoundError(
+                    f"--crc_skip_retrain set but checkpoint not found: {crc_ckpt_path}"
+                )
+            print("\n" + "=" * 50)
+            print("--- 阶段二：CRC 校正器（跳过训练，从 checkpoint 加载） ---")
+            print("=" * 50)
+            print(f"[CRC] Loading hybrid corrector from {crc_ckpt_path}")
+            try:
+                self.hybrid_corrector = torch.load(
+                    crc_ckpt_path, map_location=self.device, weights_only=False)
+            except TypeError:
+                self.hybrid_corrector = torch.load(crc_ckpt_path, map_location=self.device)
+            print("[CRC] crc_skip_retrain: 阶段二完成（未重训 Hybrid）。")
+            return self.hybrid_corrector
 
         # =======================
         # 阶段二：训练 CRC 校正器
@@ -264,6 +344,18 @@ class Exp_CRC(Exp_Long_Term_Forecast):
         print(f"DEBUG: Train - W:{W_tr.shape}, y:{y_tr_win.shape}, yhat:{yhat_tr_bl.shape}")
         print(f"DEBUG:  Val  - W:{W_vl.shape}, y:{y_vl_win.shape}, yhat:{yhat_vl_bl.shape}")
 
+        # ---- 根据 crc_val_ratio 子采样验证窗口，仅用于 HybridTrainer（安全机制）的训练 ----
+        if val_ratio < 1.0:
+            num_v = max(1, int(round(W_vl.shape[0] * val_ratio)))
+            rng = np.random.RandomState(getattr(self.args, 'seed', 42))
+            idx = rng.permutation(W_vl.shape[0])[:num_v]
+            W_vl_sub = W_vl[idx]
+            y_vl_sub = y_vl_win[idx]
+            yhat_vl_sub = yhat_vl_bl[idx]
+            print(f"[CRC] Using a subset of val windows for HybridTrainer: ratio={val_ratio:.2f}, size={num_v}/{W_vl.shape[0]}")
+        else:
+            W_vl_sub, y_vl_sub, yhat_vl_sub = W_vl, y_vl_win, yhat_vl_bl
+
         # 1) 仅用训练集构图，避免数据泄露
         raw_train_data = train_set.scaler.inverse_transform(W_tr.reshape(-1, W_tr.shape[-1]))
         A = build_corr_graph(raw_train_data, topk=self.args.top_k, thr=0.2).astype(np.float32)
@@ -271,6 +363,9 @@ class Exp_CRC(Exp_Long_Term_Forecast):
 
         # 2) Stage A：MTL 预训练（不确定性加权）
         print("\n--- Stage A: MTL Pre-training ---")
+        # q_val 用作两个目的：
+        #  (1) 传给 TorchCausalStateEncoder 的 Q（编码器容量超参）；
+        #  (2) 通过分位数映射控制 HybridTrainer 中的安全边界 quantile_q。
         pre_encoder = PretrainableEncoderMTL(
             A, self.args.seq_len, self.args.pred_len, self.args.enc_in,
             self.args.d_model, self.args.q_val
@@ -297,6 +392,27 @@ class Exp_CRC(Exp_Long_Term_Forecast):
         )
         print(f"[Priors] 多尺度先验维度 = {F_tr.shape[-1]}")
 
+        # 将整数 q_val 映射到 HybridTrainer 使用的分位数 quantile_q，
+        # 以控制安全边界 tau 的松紧（从“非常保守”到“较激进”）。
+        # 这里刻意拉大分位数跨度：
+        #   q_val = 1 -> quantile_q = 0.10  (极保守，coverage 预期很低)
+        #   q_val = 2 -> quantile_q = 0.30
+        #   q_val = 3 -> quantile_q = 0.50
+        #   q_val = 4 -> quantile_q = 0.70
+        #   q_val >= 5 -> quantile_q = 0.90  (较激进，coverage 预期较高)
+        q_int = int(getattr(self.args, 'q_val', 3))
+        if q_int <= 1:
+            quantile_q = 0.10
+        elif q_int == 2:
+            quantile_q = 0.30
+        elif q_int == 3:
+            quantile_q = 0.50
+        elif q_int == 4:
+            quantile_q = 0.70
+        else:
+            quantile_q = 0.90
+        print(f"[Hybrid] Using safety quantile_q={quantile_q:.2f} mapped from q_val={q_int}")
+
         # N = 目标通道数（与 y_tr_win / yhat_tr_bl 最后一维一致）
         N_out = y_tr_win.shape[-1]
         self.hybrid_corrector = HybridTrainer(
@@ -304,7 +420,7 @@ class Exp_CRC(Exp_Long_Term_Forecast):
             H=self.args.pred_len, N=N_out, P=self.args.seq_len,
             # 可选：l2_delta=1e-4, lr=1e-4, wd=1e-4, patience=20, max_epochs=60,
             node_emb_dim=16, use_dir_gate=True,
-            quantile_q=0.80, improve_eps=0.01,
+            quantile_q=quantile_q, improve_eps=0.01,
             scales=[6, 12, 24, 48],
             freq_bands=[(0.0, 0.05), (0.05, 0.15), (0.15, 0.35)],
             use_robust=True,
@@ -313,7 +429,13 @@ class Exp_CRC(Exp_Long_Term_Forecast):
 
         # 保护性断言（避免通道数不一致）
         assert N_out == yhat_tr_bl.shape[-1], "HybridTrainer.N must equal number of target channels"
-        self.hybrid_corrector.train(W_tr, y_tr_win, yhat_tr_bl, W_vl, y_vl_win, yhat_vl_bl)
+        # HybridTrainer 的验证集使用 (可能子采样后的) W_vl_sub / y_vl_sub / yhat_vl_sub
+        self.hybrid_corrector.train(W_tr, y_tr_win, yhat_tr_bl, W_vl_sub, y_vl_sub, yhat_vl_sub)
+
+        # 训练完成后保存 CRC 纠偏器 checkpoint（见 --crc_ckpt_dir / --crc_skip_retrain）
+        crc_save_path = crc_ckpt_path
+        torch.save(self.hybrid_corrector, crc_save_path)
+        print(f"[Checkpoint] Saved CRC hybrid corrector to {crc_save_path}")
 
         # >>>>>>>>>>>>> INSERT HERE: 空间因果矩阵 S（基于验证集窗口）& 可视化 <<<<<<<<<<<<<
         print("[Viz] 估计空间因果矩阵 S (j→i) 并可视化 ...")
@@ -376,14 +498,30 @@ class Exp_CRC(Exp_Long_Term_Forecast):
         print("在测试集上生成基线预测、真实标签和输入窗口...")
         yhat_te_bl, y_te, W_te = self._get_predictions(self.baseline_model, test_loader)  # (B,H,C_sel),(B,H,C_sel),(B,P,C_all)
 
-        print("使用 Hybrid Corrector 对基线预测进行校正...")
-        yfinal_te = self.hybrid_corrector.predict(W_te, yhat_te_bl)  # (B, H, C_sel)
+        # 仅在推理阶段应用 tau_scale：训练阶段始终使用原始 tau_map
+        tau_scale = float(getattr(self.args, "tau_scale", 1.0))
+        if hasattr(self.hybrid_corrector, "tau_scale"):
+            self.hybrid_corrector.tau_scale = tau_scale
 
-        # 在这里插入 NDR (非恶化率) 计算 
-        err_baseline = np.abs(y_te - yhat_te_bl)
-        err_final = np.abs(y_te - yfinal_te)
-        non_degraded_mask = err_final <= (err_baseline + 1e-8)
+        print(f"使用 Hybrid Corrector 对基线预测进行校正 (tau_scale={tau_scale:.3f}) ...")
+        yfinal_te, nl_abs, clip_mask = self.hybrid_corrector.predict(
+            W_te, yhat_te_bl, return_nl_abs=True, return_clip_mask=True
+        )  # nl_abs = |w2 * r_delta_c|；clip_mask = (|r_delta| > tau)
+
+        # NDR (非恶化率)：按 (horizon, node) 聚合 MAE，再比较修正前后误差
+        err_baseline = np.abs(y_te - yhat_te_bl)  # (B, H, C)
+        err_final = np.abs(y_te - yfinal_te)      # (B, H, C)
+        mae_baseline = err_baseline.mean(axis=0)  # (H, C)
+        mae_final = err_final.mean(axis=0)        # (H, C)
+        non_degraded_mask = mae_final <= (mae_baseline + 1e-8)
         paper_ndr = np.mean(non_degraded_mask) * 100.0
+
+        # Correction coverage（tau-sensitive）：非线性支路被 τ 限幅（clip）到边界的比例
+        coverage = clip_mask.mean() * 100.0
+
+        # 额外统计：非线性经限幅后的“有效贡献”超过阈值的比例（可能不随 tau_scale 明显变化）
+        cov_eps = float(getattr(self.args, "crc_coverage_eps", 1e-4))
+        nl_active = (nl_abs > cov_eps).mean() * 100.0
 
         # ---------- 与 LTF 对齐的可选 inverse ----------
         if getattr(test_set, "scale", False) and getattr(self.args, "inverse", False):
@@ -427,6 +565,8 @@ class Exp_CRC(Exp_Long_Term_Forecast):
         print(f"MAE 相对提升率: {mae_improve:.2f}%")
         print(f"MSE 相对提升率: {mse_improve:.2f}%")
         print(f"NDR (非恶化率): {paper_ndr:.1f}%") # 保持一位小数
+        print(f"Correction coverage (clip rate |r_delta|>tau): {coverage:.1f}%")
+        print(f"Nonlinear active (|w2·r_delta_c| > {cov_eps:g}): {nl_active:.1f}%")
         print("=" * 50)
 
         # ---------- 可视化（可选） ----------

@@ -33,9 +33,23 @@ if __name__ == '__main__':
                         help='[CRC only] baseline model name, options: [DLinear, Autoformer, etc.]')
     parser.add_argument('--q_val', type=int, default=3, 
                         help='[CRC only] Q value for the STCL_Core in the CRC model')
+    parser.add_argument('--tau_scale', type=float, default=1.0,
+                        help='[CRC only] Global scaling factor for safety boundary tau, applied only at inference')
     parser.add_argument('--use_dtw', action='store_true', 
                     help='Whether to calculate DTW metric in test phase', 
                     default=False)
+    parser.add_argument('--warm_start', action='store_true',
+                        help='If set, try to load existing checkpoints and skip training when possible',
+                        default=False)
+    parser.add_argument('--crc_val_ratio', type=float, default=1.0,
+                        help='[CRC only] Fraction of validation windows used for CRC Hybrid training (e.g., 0.05 / 0.1 / 0.2)')
+    parser.add_argument('--crc_skip_retrain', action='store_true',
+                        help='[CRC only] Load saved HybridTrainer and skip stage-2 training (e.g. tau_scale sweeps)',
+                        default=False)
+    parser.add_argument('--crc_ckpt_dir', type=str, default='',
+                        help='[CRC only] Directory for crc_corrector_val*.pth; default checkpoints/<setting> if empty')
+    parser.add_argument('--crc_coverage_eps', type=float, default=1e-4,
+                        help='[CRC only] Coverage = fraction of (B,H,C) with |w2*r_delta_c| > eps (tau-sensitive)')
     parser.add_argument('--patch_len', type=int, default=16, help='patch length for patch-based models')
     
     # data loader
