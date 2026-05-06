@@ -1,64 +1,64 @@
-# 时间序列预测 · CRC（Causal Residual Corrector）
+# Time-Series Forecasting with CRC (Causal Residual Corrector)
 
-本仓库在 [Time-Series-Library](https://github.com/thuml/Time-Series-Library) 风格的 **长期预测** 代码框架上，实现了 **CRC**：先训练 **基线预测器**，再训练 **混合残差校正器** 两阶段流程。
+This repository implements **CRC** on top of a [Time-Series-Library](https://github.com/thuml/Time-Series-Library)-style **long-term forecasting** codebase. CRC is a **two-stage** pipeline: first train a **baseline forecaster**, then train a **hybrid residual corrector**.
 
-**入口**：`python run.py`，设置 `--model CRC`，并用 `--baseline_model` 指定基线（如 `DLinear`、`PatchTST` 等）。
+**Entry point**: `python run.py` with `--model CRC`, and set **`--baseline_model`** to the backbone name (e.g. `DLinear`, `PatchTST`).
 
 ---
 
-## 仓库结构（与 CRC 相关）
+## Repository layout (CRC-related)
 
-| 路径 | 说明 |
+| Path | Role |
 |------|------|
-| `run.py` | 主入口：`--model CRC` 时走 CRC 实验流程。 |
-| `exp/exp_crc.py` | CRC 训练与评测逻辑（两阶段：基线 → 校正器）。 |
-| `models/CRC.py` | CRC 模型与混合训练相关实现。 |
-| `exp/exp_long_term_forecasting.py` | 长期预测基类（CRC 实验继承并扩展）。 |
-| `data_provider/` | 数据集与 DataLoader。 |
-| `utils/` | 指标（如 MSE/MAE）、可选 DTW 等。 |
-| `scripts/` | CRC 相关分析脚本（如 \(\tau\) 扫描、验证比例灵敏度等）。 |
-| `logs/` | 实验日志（可自行汇总表格或图）。 |
-| `checkpoints/` | 保存的权重（运行时生成）。 |
+| `run.py` | Main launcher; `--model CRC` runs the CRC experiment path. |
+| `exp/exp_crc.py` | CRC training and evaluation (baseline → corrector). |
+| `models/CRC.py` | CRC model and hybrid training logic. |
+| `exp/exp_long_term_forecasting.py` | Long-term forecasting base class (extended by CRC). |
+| `data_provider/` | Datasets and dataloaders. |
+| `utils/` | Metrics (e.g. MSE/MAE), optional DTW, etc. |
+| `scripts/` | CRC-oriented analysis (e.g. \(\tau\) sweeps, validation-ratio sensitivity). |
+| `logs/` | Experiment logs; you can aggregate tables or figures here. |
+| `checkpoints/` | Saved weights (created at runtime). |
 
 ---
 
-## 环境
+## Environment
 
-- Python 3.8+；PyTorch（建议配置 CUDA）。
+- Python 3.8+; PyTorch (CUDA recommended for training).
 
 ```bash
 pip install torch torchvision torchaudio
 pip install numpy pandas scikit-learn matplotlib tqdm einops psutil
 ```
 
-本仓库未必提供固定版 `requirements.txt`，请按本机 CUDA 从 [PyTorch 官网](https://pytorch.org/get-started/locally/) 选择安装命令。
+A pinned `requirements.txt` may not be provided; install PyTorch to match your CUDA using the [official instructions](https://pytorch.org/get-started/locally/).
 
 ---
 
-## 数据
+## Data
 
-将数据放在 `--root_path` / `--data_path` 指向的目录；格式与 Time-Series-Library 一致（多为带 `date` 列的 CSV）。具体默认路径以 `run.py` 中参数为准。
+Place data under the paths given by `--root_path` and `--data_path`, using the same layout as Time-Series-Library (typically CSV with a `date` column). Default paths follow the arguments in `run.py`.
 
 ---
 
-## 快速开始（CRC）
+## Quick start (CRC)
 
-使用 **`--model CRC`**，并通过 **`--baseline_model`** 选择基线模型名称（与仓库内已注册的预测模型一致）。
+Set **`--model CRC`** and choose the baseline via **`--baseline_model`** (any forecaster name registered in this repo).
 
-### CRC 常用参数
+### Common CRC flags
 
-| 参数 | 含义 |
-|------|------|
-| `--baseline_model` | 基线预测器名称（如 `DLinear`、`PatchTST`）。 |
-| `--q_val` | CRC 中与 STCL / 图相关的超参数。 |
-| `--tau_scale` | 推理时对安全边界 \(\tau\) 的全局缩放。 |
-| `--crc_val_ratio` | 用于混合阶段训练的验证窗口比例。 |
-| `--crc_skip_retrain` | 跳过第二阶段训练（例如在用已有 checkpoint 做 \(\tau\) 扫描时）。 |
-| `--crc_ckpt_dir` | 校正器 checkpoint 目录（可选）。 |
+| Flag | Meaning |
+|------|---------|
+| `--baseline_model` | Baseline forecaster name (e.g. `DLinear`, `PatchTST`). |
+| `--q_val` | Hyperparameter related to STCL / graph structure in CRC. |
+| `--tau_scale` | Global scaling of the safety boundary \(\tau\) at inference. |
+| `--crc_val_ratio` | Fraction of validation windows used for hybrid training. |
+| `--crc_skip_retrain` | Skip stage-2 training (e.g. \(\tau\) sweeps with saved checkpoints). |
+| `--crc_ckpt_dir` | Directory for corrector checkpoints (optional). |
 
-更多参数见 `run.py` 中与 `CRC` 相关的选项，以及 `exp/exp_crc.py` 中的训练 / 测试流程。
+See all CRC-related options in `run.py` and the train/test flow in `exp/exp_crc.py`.
 
-### 示例命令
+### Example command
 
 ```bash
 python run.py \
@@ -83,32 +83,32 @@ python run.py \
 
 ---
 
-## 评测说明
+## Evaluation
 
-- 指标在实验类与 `utils/metrics.py` 中计算；可选用 **`--use_dtw`** 计算 DTW。
-- 若 `test()` 中实现，日志中可能出现 **NDR** 等额外指标。
-
----
-
-## Checkpoint 与日志
-
-- **`--checkpoints`**（默认 `./checkpoints/`）：基线与 CRC 相关权重。
-- **`logs/`**：运行日志；可按需整理实验汇总。
+- Metrics are computed in the experiment classes and `utils/metrics.py`; optional **DTW** via **`--use_dtw`**.
+- Logs may report extra quantities such as **NDR** when implemented in `test()`.
 
 ---
 
-## 脚本
+## Checkpoints and logs
 
-`scripts/` 下为 CRC 相关的辅助分析（如 \(\tau\) 或验证集比例扫描）。若脚本支持，可使用：
+- **`--checkpoints`** (default `./checkpoints/`): baseline and CRC-related weights.
+- **`logs/`**: run logs; organize summaries as needed.
+
+---
+
+## Scripts
+
+`scripts/` contains CRC-oriented utilities (e.g. \(\tau\) or validation-ratio sweeps). If supported:
 
 ```bash
-python scripts/<脚本名>.py --help
+python scripts/<script_name>.py --help
 ```
 
 ---
 
-## 引用与许可证
+## Citation and license
 
-- 若使用上游 Time-Series-Library 代码栈，请按其原项目说明引用。
-- 若使用本仓库中的 **CRC** 实现，请在论文或正式发布可用后引用你的工作。
-- 许可证遵循上游 Time-Series-Library；若本仓库根目录另有 `LICENSE`，以该文件为准。
+- If you use the upstream Time-Series-Library stack, cite it as in the original project.
+- If you use the **CRC** implementation from this fork, cite your paper or release when available.
+- Licensing follows the upstream Time-Series-Library unless a separate `LICENSE` file is provided in this repository.
