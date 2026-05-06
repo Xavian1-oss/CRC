@@ -26,6 +26,40 @@ DATASETS=(Traffic)
 PRED_LENS=(336 720)
 BASELINES=(PatchTST TimesNet TimeXer DLinear) 
 
+# ================== CLI overrides (optional) ==================
+# Usage examples:
+#   bash run_pir_batch.sh --datasets Electricity --baselines TimesNet --pred_lens 96 --log_dir ./logs/tmp_pir
+USER_LOG_DIR=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --datasets)
+      shift
+      IFS=',' read -r -a DATASETS <<< "${1:-}"
+      ;;
+    --baselines|--backbones|--backbone)
+      shift
+      IFS=',' read -r -a BASELINES <<< "${1:-}"
+      ;;
+    --pred_lens|--pred_len)
+      shift
+      IFS=',' read -r -a PRED_LENS <<< "${1:-}"
+      ;;
+    --log_dir)
+      shift
+      USER_LOG_DIR="${1:-}"
+      ;;
+    -h|--help)
+      echo "run_pir_batch.sh options:"
+      echo "  --datasets    Comma-separated list (e.g. Traffic,Electricity)"
+      echo "  --baselines   Comma-separated list as PIR backbones (e.g. TimesNet,PatchTST)"
+      echo "  --pred_lens   Comma-separated list (e.g. 96,336)"
+      echo "  --log_dir     Override LOG_DIR (default: ./logs/multi_PIR_<timestamp>)"
+      exit 0
+      ;;
+  esac
+  shift
+done
+
 # ================== 数据集路径与通道数 ==================
 # (与您的脚本保持一致，无需改动)
 dataset_setup () {
@@ -250,7 +284,11 @@ getp () {
 
 # ================== 日志 ==================
 TS="$(date +'%Y%m%d_%H%M%S')"
-LOG_DIR="./logs/multi_PIR_${TS}" # 更改了日志目录名以作区分
+if [[ -n "${USER_LOG_DIR}" ]]; then
+  LOG_DIR="${USER_LOG_DIR}"
+else
+  LOG_DIR="./logs/multi_PIR_${TS}" # 更改了日志目录名以作区分
+fi
 mkdir -p "${LOG_DIR}"
 MASTER_LOG="${LOG_DIR}/master.log"
 log() { echo "[$(date +'%F %T')] $*" | tee -a "${MASTER_LOG}"; }

@@ -14,6 +14,40 @@ DATASETS=(Weather) # 用来测试画图功能
 PRED_LENS=(96)
 BASELINES=(TimesNet)
 
+# ================== CLI overrides (optional) ==================
+# Usage examples:
+#   bash run_crc_batch.sh --datasets Electricity --baselines TimesNet --pred_lens 96 --log_dir ./logs/tmp_crc
+USER_LOG_DIR=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --datasets)
+      shift
+      IFS=',' read -r -a DATASETS <<< "${1:-}"
+      ;;
+    --baselines|--baseline)
+      shift
+      IFS=',' read -r -a BASELINES <<< "${1:-}"
+      ;;
+    --pred_lens|--pred_len)
+      shift
+      IFS=',' read -r -a PRED_LENS <<< "${1:-}"
+      ;;
+    --log_dir)
+      shift
+      USER_LOG_DIR="${1:-}"
+      ;;
+    -h|--help)
+      echo "run_crc_batch.sh options:"
+      echo "  --datasets   Comma-separated list (e.g. Electricity,Weather)"
+      echo "  --baselines  Comma-separated list (e.g. TimesNet,DLinear)"
+      echo "  --pred_lens  Comma-separated list (e.g. 96,336)"
+      echo "  --log_dir    Override LOG_DIR (default: ./logs/multi_<timestamp>)"
+      exit 0
+      ;;
+  esac
+  shift
+done
+
 # ================== 数据集路径与通道数 ==================
 dataset_setup () {
   local ds="$1"
@@ -237,7 +271,11 @@ getp () {
 
 # ================== 日志 ==================
 TS="$(date +'%Y%m%d_%H%M%S')"
-LOG_DIR="./logs/multi_${TS}"
+if [[ -n "${USER_LOG_DIR}" ]]; then
+  LOG_DIR="${USER_LOG_DIR}"
+else
+  LOG_DIR="./logs/multi_${TS}"
+fi
 mkdir -p "${LOG_DIR}"
 MASTER_LOG="${LOG_DIR}/master.log"
 log() { echo "[$(date +'%F %T')] $*" | tee -a "${MASTER_LOG}"; }

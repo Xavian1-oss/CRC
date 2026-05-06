@@ -1,0 +1,76 @@
+\begin{table*}[t]
+\centering
+\caption{Non-Degradation Rate (NDR, \%) comparison between PIR and CRC on \textbf{Weather} (left) and \textbf{ETTm2} (right) across backbones and forecasting horizons. Higher is better.}
+\label{tab:ndr_weather_pir_crc}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}c@{\hspace{12pt}}c@{}}
+\begin{subtable}[t]{0.48\textwidth}
+    \centering
+    \caption*{\textbf{Weather}}
+    \begin{tabular}{llcc}
+    \toprule
+    \textbf{Backbone} & \textbf{Horizon} & \textbf{PIR} & \textbf{CRC} \\
+    \midrule
+    \multirow{4}{*}{DLinear}
+        & 96  & 87.7 & \textbf{88.2} \\
+        & 192 & 75.7 & \textbf{93.7} \\
+        & 336 & 79.1 & \textbf{89.5} \\
+        & 720 & 59.8 & \textbf{90.4} \\
+    \midrule
+    \multirow{4}{*}{PatchTST}
+        & 96  & 78.5 & \textbf{82.5} \\
+        & 192 & 80.1 & \textbf{87.0} \\
+        & 336 & 77.8 & \textbf{89.6} \\
+        & 720 & 72.0 & \textbf{90.1} \\
+    \midrule
+    \multirow{4}{*}{TimesNet}
+        & 96  & 40.1 & \textbf{84.7} \\
+        & 192 & 66.6 & \textbf{85.2} \\
+        & 336 & 59.7 & \textbf{89.5} \\
+        & 720 & 44.4 & \textbf{80.4} \\
+    \midrule
+    \multirow{4}{*}{TimeXer}
+        & 96  & 86.3 & \textbf{89.7} \\
+        & 192 & 85.9 & \textbf{87.6} \\
+        & 336 & 76.5 & \textbf{82.9} \\
+        & 720 & 71.0 & \textbf{85.5} \\
+    \bottomrule
+    \end{tabular}
+\end{subtable}
+&
+\begin{subtable}[t]{0.48\textwidth}
+    \centering
+    \caption*{\textbf{ETTm2}}
+    \begin{tabular}{llcc}
+    \toprule
+    \textbf{Backbone} & \textbf{Horizon} & \textbf{PIR} & \textbf{CRC} \\
+    \midrule
+    \multirow{4}{*}{DLinear}
+        & 96  & 67.4 & \textbf{90.0} \\
+        & 192 & 62.2 & \textbf{79.5} \\
+        & 336 & 48.8 & \textbf{87.2} \\
+        & 720 & 42.3 & \textbf{83.0} \\
+    \midrule
+    \multirow{4}{*}{PatchTST}
+        & 96  & 77.5 & \textbf{81.1} \\
+        & 192 & 65.9 & \textbf{81.9} \\
+        & 336 & 81.8 & \textbf{84.0} \\
+        & 720 & 43.7 & \textbf{86.7} \\
+    \midrule
+    \multirow{4}{*}{TimesNet}
+        & 96  & 61.5 & \textbf{78.3} \\
+        & 192 & 35.9 & \textbf{60.7} \\
+        & 336 & 20.6 & \textbf{88.4} \\
+        & 720 & 26.7 & \textbf{74.3} \\
+    \midrule
+    \multirow{4}{*}{TimeXer}
+        & 96  & 80.4 & \textbf{86.0} \\
+        & 192 & 66.1 & \textbf{80.8} \\
+        & 336 & 67.2 & \textbf{71.3} \\
+        & 720 & 36.1 & \textbf{83.2} \\
+    \bottomrule
+    \end{tabular}
+\end{subtable}
+\end{tabular}
+\end{table*}

@@ -12,151 +12,9 @@ from models.CRC import (
 from data_provider.data_factory import data_provider
 from utils.metrics import metric
 from utils.dtw_metric import accelerated_dtw
-from utils.tools import visual
-import matplotlib.pyplot as plt
-import networkx as nx
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-from scipy.stats import spearmanr
-import seaborn as sns
 
 
 warnings.filterwarnings('ignore')
-
-def visualize_dynamic_spatial_causality_composite(
-    dyn_series: np.ndarray, 
-    edge_index: np.ndarray, 
-    N: int, 
-    num_snapshots: int = 4,   # 核心参数：要展示的快照数量
-    sample_stride: int = 100, # 核心参数：快照之间的时间间隔
-    save_dir: str = None
-):
-    """
-    基于动态边强度序列，生成包含多个子图的复合空间因果矩阵图。
-    """
-    B, M = dyn_series.shape
-    
-    # 1. 确定要采样的索引
-    # 确保索引不超过 B
-    sample_indices = np.arange(0, B, sample_stride)
-    # 只取前 num_snapshots 个，如果不够则全部取
-    sample_indices = sample_indices[:num_snapshots] 
-    
-    if len(sample_indices) < 2:
-        print("警告: 采样的快照数量不足 2 个，无法有效展示动态变化。")
-        return
-
-    # 2. 准备映射关系和标签
-    target_nodes = edge_index[0, :] # i
-    source_nodes = edge_index[1, :] # j
-    node_names = [f"N{i}" for i in range(N)]
-    
-    # 确定全局 VMAX/VMIN 以统一色标
-    global_vmax = np.max(dyn_series)
-    
-    # 3. 创建画布和子图
-    # 布局为 1 行 num_snapshots 列
-    # 调整figsize以容纳多个子图和一个共享的色标
-    figsize = (4 * num_snapshots + 2, max(5, N / 3)) # +2 用于色标
-    fig, axes = plt.subplots(
-        1, len(sample_indices), 
-        figsize=figsize, 
-        sharey=True, 
-        gridspec_kw={'wspace': 0.1} # 减少子图间距
-    )
-    
-    # 如果只有一个子图，plt.subplots返回的不是数组，需要转换
-    if len(sample_indices) == 1:
-        axes = [axes]
-
-    print(f"将生成包含 {len(sample_indices)} 个子图的复合动态因果矩阵图...")
-
-    for k, t in enumerate(sample_indices):
-        ax = axes[k]
-        current_strengths = dyn_series[t, :]
-        S_t = np.zeros((N, N), dtype=np.float32)
-        
-        # 填充 S_t 矩阵 (S_t[i, j] = strength of j -> i)
-        for i_idx in range(M):
-            i = target_nodes[i_idx]
-            j = source_nodes[i_idx]
-            S_t[i, j] = current_strengths[i_idx]
-        
-        # 4. 绘制热力图
-        # 注意: cbar=False 用于除了最后一个子图外的所有图
-        cbar_bool = (k == len(sample_indices) - 1)
-        
-        sns.heatmap(
-            S_t, 
-            ax=ax,
-            xticklabels=node_names, 
-            yticklabels=node_names if k == 0 else False, # 只有第一张图显示Y轴标签
-            cmap='Reds',
-            vmin=0, vmax=global_vmax, # 统一色标
-            cbar=cbar_bool,           # 只有最后一张图显示色标
-            cbar_kws={'label': 'Causal Strength (αj→i)'}
-        )
-        
-        ax.set_title(f"Window Index {t}", fontsize=10)
-        ax.set_xlabel("Source Node (j)", fontsize=8)
-        
-        # 调整刻度标签，防止重叠
-        ax.set_xticks(ax.get_xticks())
-        ax.set_xticklabels(node_names, rotation=90, fontsize=6)
-        
-        if k == 0:
-             ax.set_ylabel("Target Node (i)", fontsize=8)
-        else:
-             # 确保后续子图的Y轴标签和刻度被隐藏，但共享坐标
-             ax.tick_params(axis='y', length=0)
-             
-    plt.suptitle(f"Dynamic Spatial Causality Matrix Snapshots ({len(sample_indices)} Time Points)", fontsize=14)
-    plt.tight_layout(rect=[0, 0, 1, 0.95]) # 为suptitle留出空间
-    
-    # 5. 保存
-    if save_dir:
-        save_path = os.path.join(save_dir, "dynamic_causal_composite.png")
-        print(f"Saving composite heatmap to {save_path}")
-        plt.savefig(save_path, dpi=300)
-    plt.close()
-
-def visualize_spatial_causal_heatmap(S, node_names=None, save_dir=None, tag="val"):
-    """
-    使用热力图可视化空间因果矩阵 S。
-    基于您的代码，S[i, j] 对应 j -> i 的因果强度。
-    """
-    N = S.shape[0]
-    if node_names is None:
-        node_names = [f"N{i}" for i in range(N)]
-    
-    figsize = (max(8, N // 3), max(6, N // 3))
-    plt.figure(figsize=figsize)
-    
-    ax = sns.heatmap(
-        S, 
-        xticklabels=node_names, 
-        yticklabels=node_names,
-        cmap='RdBu_r',       # 推荐使用发散色图
-        center=0,            # 将 0 设置为颜色的中心
-        annot=False,         # 如果 N 较小 (如 N < 30)，可设为 True 来显示数字
-        fmt=".2f"            # (如果 annot=True) 数字的格式
-    )
-    
-    plt.xlabel("Source Node (j)   [j → i]", fontsize=12)
-    plt.ylabel("Target Node (i)   [j → i]", fontsize=12)
-    
-    # 旋转 x 轴标签，防止重叠
-    plt.xticks(rotation=90) 
-    plt.yticks(rotation=0)
-    
-    plt.title(f"Spatial Causality Matrix (Heatmap: S[i, j] = strength of j → i)")
-    plt.tight_layout()
-    
-    if save_dir:
-        save_path = os.path.join(save_dir, f"spatial_causal_heatmap_{tag}.png")
-        print(f"Saving heatmap to {save_path}")
-        plt.savefig(save_path, dpi=200)
-    plt.close()
 
 def quick_val_series_from_windows(W_val):
     """
@@ -437,31 +295,8 @@ class Exp_CRC(Exp_Long_Term_Forecast):
         torch.save(self.hybrid_corrector, crc_save_path)
         print(f"[Checkpoint] Saved CRC hybrid corrector to {crc_save_path}")
 
-        # >>>>>>>>>>>>> INSERT HERE: 空间因果矩阵 S（基于验证集窗口）& 可视化 <<<<<<<<<<<<<
-        print("[Viz] 估计空间因果矩阵 S (j→i) 并可视化 ...")
-        viz_dir = os.path.join('./results', setting, 'viz_train')
-        os.makedirs(viz_dir, exist_ok=True)
-        # S_val = pre_encoder.encoder.estimate_spatial_causality_matrix(W_vl, batch_size=256)  # (N,N)
-        # np.save(os.path.join(viz_dir, 'S_val.npy'), S_val)
-        # 展示动态序列
-        S_val, dyn_series_val = pre_encoder.encoder.estimate_spatial_causality_matrix(
-            W_vl, batch_size=256, 
-            return_series=True  
-        )  
-        np.save(os.path.join(viz_dir, 'S_val_dynamic_series.npy'), dyn_series_val)
-        node_names_list = [f"N{i}" for i in range(S_val.shape[0])]
-        visualize_spatial_causal_heatmap(S_val, node_names=node_names_list, save_dir=viz_dir, tag="val_avg")
-
-        N_nodes = S_val.shape[0] 
-
-        visualize_dynamic_spatial_causality_composite(
-            dyn_series=dyn_series_val, 
-            edge_index=pre_encoder.encoder.edge_index.cpu().numpy(), 
-            N=N_nodes,
-            num_snapshots=4,     # 论文中展示 4 个快照
-            sample_stride=200,   # 每隔 200 个时间窗口取一个快照
-            save_dir=viz_dir
-        )
+        # ---------- 可视化 ----------
+        # 批量实验时会显著拖慢速度且可能触发绘图边界问题，这里默认不在 train() 中生成空间因果可视化。
         
         print("\n>>>>>>> CRC 训练流程全部完成 <<<<<<<")
         return self.hybrid_corrector
@@ -569,17 +404,8 @@ class Exp_CRC(Exp_Long_Term_Forecast):
         print(f"Nonlinear active (|w2·r_delta_c| > {cov_eps:g}): {nl_active:.1f}%")
         print("=" * 50)
 
-        # ---------- 可视化（可选） ----------
-        folder_path = './test_results/' + setting + '/'
-        os.makedirs(folder_path, exist_ok=True)
-        print("生成可视化图片...")
-        for i in range(min(W_te.shape[0], 100)):
-            if i % 20 == 0:
-                # 仍沿用“最后一列”的可视化习惯；如需严格按目标列索引，按需替换这里的 -1
-                gt = np.concatenate((W_te[i, :, -1], y_te[i, :, -1]), axis=0)
-                pd = np.concatenate((W_te[i, :, -1], yfinal_te[i, :, -1]), axis=0)
-                visual(gt, pd, os.path.join(folder_path, f'{i}.pdf'))
-        print(f"图片保存在: {folder_path}")
+        # ---------- 可视化 ----------
+        # 批量实验时会生成大量文件且拖慢速度，这里默认不在 test() 中生成可视化。
 
         # ---------- 保存结果 ----------
         folder_path = './results/' + setting + '/'

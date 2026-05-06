@@ -274,6 +274,7 @@ class Exp_Long_Term_Forecast_PIR(Exp_Basic):
 
         preds = []
         trues = []
+        baseline_preds = []  # backbone intermediate forecast for NDR
         folder_path = './test_results/' + setting + '/'
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
@@ -294,20 +295,27 @@ class Exp_Long_Term_Forecast_PIR(Exp_Basic):
 
                 outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark, mode='refine')
                 outputs, quality = outputs
+                # quality[0] is the backbone intermediate forecast before refinement
+                intermediate_results = quality[0]
 
                 f_dim = -1 if self.args.features == 'MS' else 0
                 outputs = outputs[:, -self.args.pred_len:, :]
+                intermediate_results = intermediate_results[:, -self.args.pred_len:, :]
                 batch_y = batch_y[:, -self.args.pred_len:, :].to(self.device)
                 outputs = outputs.detach().cpu().numpy()
+                intermediate_results = intermediate_results.detach().cpu().numpy()
                 batch_y = batch_y.detach().cpu().numpy()
 
                 outputs = outputs[:, :, f_dim:]
+                intermediate_results = intermediate_results[:, :, f_dim:]
                 batch_y = batch_y[:, :, f_dim:]
 
                 pred = outputs
+                base_pred = intermediate_results
                 true = batch_y
 
                 preds.append(pred)
+                baseline_preds.append(base_pred)
                 trues.append(true)
                 # gt_loss.append(intermediate_results_loss.detach().cpu().numpy())
                 # pred_loss.append(quality[1].detach().cpu().numpy())
@@ -322,8 +330,10 @@ class Exp_Long_Term_Forecast_PIR(Exp_Basic):
 
         preds = np.array(preds, dtype=object)
         trues = np.array(trues, dtype=object)
+        baseline_preds = np.array(baseline_preds, dtype=object)
         preds = np.concatenate(preds, axis=0)
         trues = np.concatenate(trues, axis=0)
+        baseline_preds = np.concatenate(baseline_preds, axis=0)
 
         print('test shape:', preds.shape, trues.shape)
 
@@ -334,6 +344,15 @@ class Exp_Long_Term_Forecast_PIR(Exp_Basic):
 
         mae, mse, rmse, mape, mspe = metric(preds, trues)
         print('mse:{}, mae:{}'.format(mse, mae))
+
+        # NDR (非恶化率)：按 (horizon, channel) 聚合 MAE，再比较 refine 前后误差
+        err_baseline = np.abs(trues - baseline_preds)  # (B,H,C)
+        err_final = np.abs(trues - preds)              # (B,H,C)
+        mae_baseline_map = err_baseline.mean(axis=0)   # (H,C)
+        mae_final_map = err_final.mean(axis=0)         # (H,C)
+        non_degraded_mask = mae_final_map <= (mae_baseline_map + 1e-8)
+        paper_ndr = np.mean(non_degraded_mask) * 100.0
+        print(f"NDR (非恶化率): {paper_ndr:.1f}%")
         # f = open("result_long_term_forecast.txt", 'a')
         # f.write(setting + "  \n")
         # f.write('mse:{}, mae:{}'.format(mse, mae))

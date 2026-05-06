@@ -1,0 +1,21 @@
+\begin{table}[t]
+\centering
+\small
+\caption{NDR results on ETTm2 (pred\_len=96). Lower is better.}
+\label{tab:ndr-ettm2-pl96}
+\begin{tabular}{llrrr}
+\toprule
+Setting & Backbone & pred\_len & d\_model & NDR (\%) \\
+\midrule
+CRC & DLinear  & 96 & 512 & 90.0 \\
+CRC & PatchTST & 96 & 512 & 81.1 \\
+CRC & TimesNet & 96 & 32  & 78.3 \\
+CRC & TimeXer  & 96 & 256 & 86.0 \\
+\midrule
+PIR & DLinear  & 96 & 512 & 67.4 \\
+PIR & PatchTST & 96 & 512 & 77.5 \\
+PIR & TimesNet & 96 & 32  & 61.5 \\
+PIR & TimeXer  & 96 & 256 & 80.4 \\
+\bottomrule
+\end{tabular}
+\end{table}
