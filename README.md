@@ -1,6 +1,6 @@
-# Time-Series Forecasting with CRC (Causal Residual Corrector)
+# Time-Series Forecasting with CRC
 
-This repository implements **CRC** on top of a [Time-Series-Library](https://github.com/thuml/Time-Series-Library)-style **long-term forecasting** codebase. CRC is a **two-stage** pipeline: first train a **baseline forecaster**, then train a **hybrid residual corrector**.
+This repository implements **CRC** on top of a [Time-Series-Library](https://github.com/thuml/Time-Series-Library)-style **long-term forecasting** codebase. CRC is a **two-stage** pipeline: first train a **baseline forecaster**, then train a **hybrid residual corrector** on top of the baseline outputs.
 
 **Entry point**: `python run.py` with `--model CRC`, and set **`--baseline_model`** to the backbone name (e.g. `DLinear`, `PatchTST`).
 
