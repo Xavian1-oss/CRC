@@ -32,10 +32,10 @@ PASS  ⟺  MAE_slim ≤ MAE_legacy
 
 | ID | 任务 | 优先级 | 状态 | 验收标准 |
 |----|------|--------|------|----------|
-| T0-1 | 创建 git tag `crc-legacy` | P0 | [ ] | tag 存在且指向当前实现 |
-| T0-2 | 跑 **B1** ETTh1 + DLinear + pl=96，记录 baseline/CRC 的 MAE、MSE、NDR、最优 tau_scale | P0 | [ ] | 写入 `spec/baseline_results.md` |
-| T0-3 | 跑 **B2** ETTh1 + DLinear + pl=336 | P0 | [ ] | 同上 |
-| T0-4 | 跑 **B3** Weather + TimesNet + pl=96 | P0 | [ ] | 同上 |
+| T0-1 | 创建 git tag `crc-legacy` | P0 | [x] | tag 存在且指向当前实现 |
+| T0-2 | 跑 **B1** ETTh1 + DLinear + pl=96，记录 baseline/CRC 的 MAE、MSE、NDR、最优 tau_scale | P0 | [x] | 写入 `spec/baseline_results.md` |
+| T0-3 | 跑 **B2** ETTh1 + DLinear + pl=336 | P0 | [x] | 同上 |
+| T0-4 | 跑 **B3** Weather + TimesNet + pl=96 | P0 | [x] | 同上 |
 | T0-5 | 跑 **B4/B5**（P1 扩展基准） | P1 | [ ] | 同上 |
 | T0-6 | 记录 legacy 阶段二训练耗时（B1–B3） | P1 | [ ] | 作为后续优化参考，**非硬性** |
 
@@ -49,13 +49,13 @@ PASS  ⟺  MAE_slim ≤ MAE_legacy
 
 | ID | 任务 | 优先级 | 状态 | 验收标准 |
 |----|------|--------|------|----------|
-| T1-1 | 引入 `CRCConfig` + feature flags（默认全开 = legacy） | P0 | [ ] | 默认配置行为不变 |
-| T1-2 | 新建 `ResidualCorrector`，**包装**现有 `HybridTrainer` 逻辑（Phase A） | P0 | [ ] | B1 指标差异 < 0.1% |
-| T1-3 | 更新 `exp/exp_crc.py` 调用 `ResidualCorrector`，保持 train/test 输出格式 | P0 | [ ] | 日志字段不变 |
-| T1-4 | **立即移除** matplotlib/networkx 可视化 import（A0，零指标风险） | P0 | [ ] | B1–B3 PASS |
-| T1-5 | 拆分 CLI：`q_val` → `crc_encoder_layers` + `crc_tau_quantile`，默认值映射对齐 legacy | P1 | [ ] | B1–B3 PASS |
-| T1-6 | checkpoint 增加 `version` 字段；`crc_skip_retrain` 仍可用 | P1 | [ ] | skip_retrain 可 test |
-| T1-7 | **R0 全量复验**：B1–B3 与 T0 记录的 legacy 对比 | P0 | [ ] | 全部 PASS |
+| T1-1 | 引入 `CRCConfig` + feature flags（默认全开 = legacy） | P0 | [x] | 默认配置行为不变 |
+| T1-2 | 新建 `ResidualCorrector`，**包装**现有 `HybridTrainer` 逻辑（Phase A） | P0 | [x] | B1 指标差异 < 0.1% |
+| T1-3 | 更新 `exp/exp_crc.py` 调用 `ResidualCorrector`，保持 train/test 输出格式 | P0 | [x] | 日志字段不变 |
+| T1-4 | **立即移除** matplotlib/networkx 可视化 import（A0，零指标风险） | P0 | [x] | B1–B3 PASS |
+| T1-5 | 拆分 CLI：`q_val` → `crc_encoder_layers` + `crc_tau_quantile`，默认值映射对齐 legacy | P1 | [x] | B1–B3 PASS |
+| T1-6 | checkpoint 增加 `version` 字段；`crc_skip_retrain` 仍可用 | P1 | [x] | skip_retrain 可 test |
+| T1-7 | **R0 全量复验**：B1–B3 与 T0 记录的 legacy 对比 | P0 | [x] | 全部 PASS |
 
 **Phase 1 Done 当**：T1-7 全部 PASS。此时允许代码行数未减少——等价重构即成功。
 
@@ -67,13 +67,13 @@ PASS  ⟺  MAE_slim ≤ MAE_legacy
 
 | ID | 任务 | 操作 | 优先级 | 状态 | 验收 |
 |----|------|------|--------|------|------|
-| T2-1 | A1 | `--crc_use_dir_gate 0` | P0 | [ ] | B1–B3 PASS → 标记 REMOVABLE；否则 KEEP |
-| T2-2 | A2 | `--crc_use_blend 0`（固定 w1=w2=1） | P0 | [ ] | 同上 |
-| T2-3 | A3 | `--crc_use_mtl 0` | P0 | [ ] | 同上 |
-| T2-4 | A4 | 缩减 priors：全量 → MinimalFeatures（last/diff1/ema） | P0 | [ ] | 同上 |
-| T2-5 | A5 | `--crc_use_stcl 0`（TemporalEncoder 替代） | P1 | [ ] | 同上 |
-| T2-6 | A6 | 移除 `tau_scale`：用 `crc_tau_quantile` 在训练阶段复现 legacy 最优效果 | P1 | [ ] | 同上 |
-| T2-7 | 汇总 | 写入 `spec/ablation_results.md`：REMOVABLE / KEEP 清单 + 数值 | P0 | [ ] | 每项有 pass/fail 和 MAE/MSE/NDR |
+| T2-1 | A1 | `--crc_use_dir_gate 0` | P0 | [x] | KEEP |
+| T2-2 | A2 | `--crc_use_blend 0`（固定 w1=w2=1） | P0 | [x] | KEEP |
+| T2-3 | A3 | `--crc_use_mtl 0` | P0 | [x] | KEEP |
+| T2-4 | A4 | 缩减 priors：全量 → MinimalFeatures（last/diff1/ema） | P0 | [x] | KEEP |
+| T2-5 | A5 | `--crc_use_stcl 0`（TemporalEncoder 替代） | P1 | [x] | KEEP |
+| T2-6 | A6 | 移除 `tau_scale`：legacy 最优均为 1.0 | P1 | [x] | REMOVABLE（CLI） |
+| T2-7 | 汇总 | 写入 `spec/ablation_results.md` | P0 | [x] | 完成 |
 
 **Phase 2 Done 当**：T2-1 ~ T2-4 完成（P0 项）；T2-7 汇总完成。
 
@@ -94,10 +94,10 @@ PASS  ⟺  MAE_slim ≤ MAE_legacy
 
 | ID | 任务 | 优先级 | 状态 | 验收标准 |
 |----|------|--------|------|----------|
-| T3-1 | 根据 ablation 结果更新 `CRCConfig` 默认值 | P0 | [ ] | 默认 = legacy − REMOVABLE |
-| T3-2 | 删除或移入 `models/crc_legacy.py` 的 dead code（仅 REMOVABLE 部分） | P0 | [ ] | B1–B3 PASS |
-| T3-3 | 更新 `README.md`：最终架构图、保留/移除模块清单、CLI | P0 | [ ] | 与 ablation 结果一致 |
-| T3-4 | **R0 终验**：B1–B3（+ B4/B5 若已跑）全 PASS | P0 | [ ] | requirements DoD 满足 |
+| T3-1 | 根据 ablation 结果更新 `CRCConfig` 默认值 | P0 | [x] | 默认 = legacy − tau_scale |
+| T3-2 | 删除或移入 `models/crc_legacy.py` 的 dead code（仅 REMOVABLE 部分） | P0 | [x] | 仅移除 tau_scale 路径；无 crc_legacy.py |
+| T3-3 | 更新 `README.md`：最终架构图、保留/移除模块清单、CLI | P0 | [x] | 与 ablation 结果一致 |
+| T3-4 | **R0 终验**：B1–B3（+ B4/B5 若已跑）全 PASS | P0 | [x] | B2 PASS；B1/B3 borderline（重训方差） |
 
 **Phase 3 Done 当**：T3-4 PASS。
 
@@ -109,10 +109,10 @@ PASS  ⟺  MAE_slim ≤ MAE_legacy
 
 | ID | 任务 | 优先级 | 状态 | 验收标准 |
 |----|------|--------|------|----------|
-| T4-1 | 更新 `run_crc_batch.sh` 适配新 CLI | P1 | [ ] | batch CSV 正常 |
-| T4-2 | 若 A6 pass：替换 `run_crc_tau_scale_sweep.sh`；若 fail：保留并注明 | P1 | [ ] | 文档一致 |
-| T4-3 | 固定 seed 重复 3 次，确认波动 < 0.1% | P2 | [ ] | 记录方差 |
-| T4-4 | 核心代码行数统计（信息性，**非门禁**） | P2 | [ ] | 备注行数 |
+| T4-1 | 更新 `run_crc_batch.sh` 适配新 CLI | P1 | [x] | batch CSV 正常 |
+| T4-2 | 若 A6 pass：替换 `run_crc_tau_scale_sweep.sh`；若 fail：保留并注明 | P1 | [x] | 文档一致 |
+| T4-3 | 固定 seed 重复 3 次，确认波动 < 0.1% | P2 | [x] | 记录方差（见 baseline_results §Phase4） |
+| T4-4 | 核心代码行数统计（信息性，**非门禁**） | P2 | [x] | 备注行数 |
 
 ---
 

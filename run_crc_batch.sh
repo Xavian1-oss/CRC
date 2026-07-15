@@ -7,6 +7,15 @@ export CUDA_VISIBLE_DEVICES=0
 # --- 以下参数为 GDEF 之外的全局设置 ---
 # USE_DTW=--use_dtw
 Q_VAL=3
+# q_val legacy mapping: layers=Q_VAL, tau quantile from table below
+CRC_ENCODER_LAYERS=${Q_VAL}
+case "${Q_VAL}" in
+  1) CRC_TAU_QUANTILE=0.10 ;;
+  2) CRC_TAU_QUANTILE=0.30 ;;
+  3) CRC_TAU_QUANTILE=0.50 ;;
+  4) CRC_TAU_QUANTILE=0.70 ;;
+  *) CRC_TAU_QUANTILE=0.90 ;;
+esac
 INVERSE=''   # 若要还原尺度评估，设为 '--inverse'
 
 # ================== 想批量跑的组合 ==================
@@ -359,7 +368,8 @@ python -u run.py \
   --gpu 0 \
   ${USE_DTW:-} ${INVERSE} \
   ${USEAMPv} \
-  --q_val ${Q_VAL} \
+  --crc_encoder_layers ${CRC_ENCODER_LAYERS} \
+  --crc_tau_quantile ${CRC_TAU_QUANTILE} \
   --des CRC_${baseline}_M_d${DMODELv}
 EOF
   } | tee -a "${log_file}" >> "${MASTER_LOG}"
@@ -403,8 +413,8 @@ EOF
     ${USE_DTW:-} ${INVERSE} \
     ${USEAMPv} \
     --warm_start \
-    --warm_start \
-    --q_val "${Q_VAL}" \
+    --crc_encoder_layers "${CRC_ENCODER_LAYERS}" \
+    --crc_tau_quantile "${CRC_TAU_QUANTILE}" \
     --des "CRC_${baseline}_M_d${DMODELv}" \
     2> >(tee -a "${log_file}" >> "${MASTER_LOG}" >&2) \
     | tee -a "${log_file}" >> "${MASTER_LOG}"

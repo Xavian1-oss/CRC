@@ -31,10 +31,24 @@ if __name__ == '__main__':
     # <<< 为 CRC 流程添加专属参数 >>>
     parser.add_argument('--baseline_model', type=str, default='DLinear', 
                         help='[CRC only] baseline model name, options: [DLinear, Autoformer, etc.]')
-    parser.add_argument('--q_val', type=int, default=3, 
-                        help='[CRC only] Q value for the STCL_Core in the CRC model')
-    parser.add_argument('--tau_scale', type=float, default=1.0,
-                        help='[CRC only] Global scaling factor for safety boundary tau, applied only at inference')
+    parser.add_argument('--q_val', type=int, default=3,
+                        help='[CRC only, legacy] Maps to encoder layers + tau quantile; prefer --crc_encoder_layers / --crc_tau_quantile')
+    parser.add_argument('--crc_encoder_layers', type=int, default=None,
+                        help='[CRC only] STCL encoder layers (default: --q_val or 3)')
+    parser.add_argument('--crc_tau_quantile', type=float, default=None,
+                        help='[CRC only] Safety boundary tau quantile (default: mapped from --q_val or 0.5)')
+    parser.add_argument('--crc_use_mtl', type=int, default=1,
+                        help='[CRC only] Enable MTL pretraining (1=on, 0=off)')
+    parser.add_argument('--crc_use_blend', type=int, default=1,
+                        help='[CRC only] Enable blend grid search (1=on, 0=off; ablation flag)')
+    parser.add_argument('--crc_use_dir_gate', type=int, default=1,
+                        help='[CRC only] Enable direction gate (1=on, 0=off)')
+    parser.add_argument('--crc_use_stcl', type=int, default=1,
+                        help='[CRC only] Use STCL encoder vs TemporalEncoder (ablation flag)')
+    parser.add_argument('--crc_use_priors', type=int, default=1,
+                        help='[CRC only] Enable physics priors (1=on, 0=off)')
+    parser.add_argument('--crc_use_minimal_priors', type=int, default=0,
+                        help='[CRC only] Use minimal priors (last/diff1/ema_12) instead of full multi-scale (ablation A4)')
     parser.add_argument('--use_dtw', action='store_true', 
                     help='Whether to calculate DTW metric in test phase', 
                     default=False)
@@ -44,7 +58,7 @@ if __name__ == '__main__':
     parser.add_argument('--crc_val_ratio', type=float, default=1.0,
                         help='[CRC only] Fraction of validation windows used for CRC Hybrid training (e.g., 0.05 / 0.1 / 0.2)')
     parser.add_argument('--crc_skip_retrain', action='store_true',
-                        help='[CRC only] Load saved HybridTrainer and skip stage-2 training (e.g. tau_scale sweeps)',
+                        help='[CRC only] Load saved corrector and skip stage-2 training (e.g. tau quantile sweeps)',
                         default=False)
     parser.add_argument('--crc_ckpt_dir', type=str, default='',
                         help='[CRC only] Directory for crc_corrector_val*.pth; default checkpoints/<setting> if empty')

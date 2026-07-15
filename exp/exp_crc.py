@@ -6,8 +6,8 @@ from copy import deepcopy
 
 from exp.exp_long_term_forecasting import Exp_Long_Term_Forecast
 from models.CRC import (
-    PretrainableEncoderMTL, HybridTrainer, mtl_pretrain_trainer,
-    build_corr_graph, build_physics_priors_ms
+    ResidualCorrector, CRCConfig,
+    build_corr_graph, load_crc_checkpoint, save_crc_checkpoint,
 )
 from data_provider.data_factory import data_provider
 from utils.metrics import metric
@@ -40,7 +40,12 @@ class Exp_CRC(Exp_Long_Term_Forecast):
         self.args = args
         self.device = args.device
         self.baseline_model = None
-        self.hybrid_corrector = None
+        self.corrector = None
+
+    @property
+    def hybrid_corrector(self):
+        """Backward-compatible alias for ResidualCorrector.hybrid."""
+        return self.corrector.hybrid if self.corrector is not None else None
 
     def _build_model(self):
         # CRC 不直接用 self.model
@@ -176,14 +181,10 @@ class Exp_CRC(Exp_Long_Term_Forecast):
             print("\n" + "=" * 50)
             print("--- 阶段二：CRC 校正器（跳过训练，从 checkpoint 加载） ---")
             print("=" * 50)
-            print(f"[CRC] Loading hybrid corrector from {crc_ckpt_path}")
-            try:
-                self.hybrid_corrector = torch.load(
-                    crc_ckpt_path, map_location=self.device, weights_only=False)
-            except TypeError:
-                self.hybrid_corrector = torch.load(crc_ckpt_path, map_location=self.device)
-            print("[CRC] crc_skip_retrain: 阶段二完成（未重训 Hybrid）。")
-            return self.hybrid_corrector
+            print(f"[CRC] Loading corrector from {crc_ckpt_path}")
+            self.corrector = load_crc_checkpoint(crc_ckpt_path, map_location=self.device)
+            print("[CRC] crc_skip_retrain: 阶段二完成（未重训 corrector）。")
+            return self.corrector
 
         # =======================
         # 阶段二：训练 CRC 校正器
@@ -216,90 +217,26 @@ class Exp_CRC(Exp_Long_Term_Forecast):
 
         # 1) 仅用训练集构图，避免数据泄露
         raw_train_data = train_set.scaler.inverse_transform(W_tr.reshape(-1, W_tr.shape[-1]))
-        A = build_corr_graph(raw_train_data, topk=self.args.top_k, thr=0.2).astype(np.float32)
+        crc_cfg = CRCConfig.from_args(self.args)
+        A = build_corr_graph(raw_train_data, topk=crc_cfg.graph_topk, thr=0.2).astype(np.float32)
         print(f"邻接矩阵完成，密度: {A.sum() / (A.shape[0] ** 2):.3f}")
 
-        # 2) Stage A：MTL 预训练（不确定性加权）
-        print("\n--- Stage A: MTL Pre-training ---")
-        # q_val 用作两个目的：
-        #  (1) 传给 TorchCausalStateEncoder 的 Q（编码器容量超参）；
-        #  (2) 通过分位数映射控制 HybridTrainer 中的安全边界 quantile_q。
-        pre_encoder = PretrainableEncoderMTL(
-            A, self.args.seq_len, self.args.pred_len, self.args.enc_in,
-            self.args.d_model, self.args.q_val
-        )
-        mtl_pretrain_trainer(
-            pre_encoder,
-            W_tr, y_tr_win, W_vl, y_vl_win,
-            yhat_tr_bl, yhat_vl_bl,
-            mask_ratio=0.0,
-            # 其他超参：mask_ratio=0.15, lr=1e-3, wd=1e-4, ...
-        )
-
-        # 3) Stage B：Hybrid 纠偏（多尺度先验）
-        print("\n--- Stage B: Hybrid Corrector (multi-scale priors) ---")
-        # 仅用训练集生成先验统计（mu/sd）
-        F_tr, F_mu, F_sd, feat_names = build_physics_priors_ms(
-            W_tr, A,
-            scales=[6, 12, 24, 48],
-            freq_bands=[(0.0, 0.05), (0.05, 0.15), (0.15, 0.35)],
-            use_robust=True,
-            top_m=None,                      # 如需特征筛选可设整数，例如 32
-            R_train=(y_tr_win - yhat_tr_bl), # 仅在 top_m 非 None 时会用到
-            mu=None, sd=None
-        )
-        print(f"[Priors] 多尺度先验维度 = {F_tr.shape[-1]}")
-
-        # 将整数 q_val 映射到 HybridTrainer 使用的分位数 quantile_q，
-        # 以控制安全边界 tau 的松紧（从“非常保守”到“较激进”）。
-        # 这里刻意拉大分位数跨度：
-        #   q_val = 1 -> quantile_q = 0.10  (极保守，coverage 预期很低)
-        #   q_val = 2 -> quantile_q = 0.30
-        #   q_val = 3 -> quantile_q = 0.50
-        #   q_val = 4 -> quantile_q = 0.70
-        #   q_val >= 5 -> quantile_q = 0.90  (较激进，coverage 预期较高)
-        q_int = int(getattr(self.args, 'q_val', 3))
-        if q_int <= 1:
-            quantile_q = 0.10
-        elif q_int == 2:
-            quantile_q = 0.30
-        elif q_int == 3:
-            quantile_q = 0.50
-        elif q_int == 4:
-            quantile_q = 0.70
-        else:
-            quantile_q = 0.90
-        print(f"[Hybrid] Using safety quantile_q={quantile_q:.2f} mapped from q_val={q_int}")
-
-        # N = 目标通道数（与 y_tr_win / yhat_tr_bl 最后一维一致）
         N_out = y_tr_win.shape[-1]
-        self.hybrid_corrector = HybridTrainer(
-            pre_encoder.encoder, A, F_mu=F_mu, F_sd=F_sd,
-            H=self.args.pred_len, N=N_out, P=self.args.seq_len,
-            # 可选：l2_delta=1e-4, lr=1e-4, wd=1e-4, patience=20, max_epochs=60,
-            node_emb_dim=16, use_dir_gate=True,
-            quantile_q=quantile_q, improve_eps=0.01,
-            scales=[6, 12, 24, 48],
-            freq_bands=[(0.0, 0.05), (0.05, 0.15), (0.15, 0.35)],
-            use_robust=True,
-            top_m=None
+        self.corrector = ResidualCorrector(
+            crc_cfg, A, H=self.args.pred_len, N=N_out,
+            P=self.args.seq_len, d_model=self.args.d_model, enc_in=self.args.enc_in,
         )
+        assert N_out == yhat_tr_bl.shape[-1], "Corrector.N must equal number of target channels"
+        self.corrector.train(W_tr, y_tr_win, yhat_tr_bl, W_vl_sub, y_vl_sub, yhat_vl_sub)
 
-        # 保护性断言（避免通道数不一致）
-        assert N_out == yhat_tr_bl.shape[-1], "HybridTrainer.N must equal number of target channels"
-        # HybridTrainer 的验证集使用 (可能子采样后的) W_vl_sub / y_vl_sub / yhat_vl_sub
-        self.hybrid_corrector.train(W_tr, y_tr_win, yhat_tr_bl, W_vl_sub, y_vl_sub, yhat_vl_sub)
-
-        # 训练完成后保存 CRC 纠偏器 checkpoint（见 --crc_ckpt_dir / --crc_skip_retrain）
-        crc_save_path = crc_ckpt_path
-        torch.save(self.hybrid_corrector, crc_save_path)
-        print(f"[Checkpoint] Saved CRC hybrid corrector to {crc_save_path}")
+        save_crc_checkpoint(crc_ckpt_path, self.corrector)
+        print(f"[Checkpoint] Saved CRC corrector (version={ResidualCorrector.VERSION}) to {crc_ckpt_path}")
 
         # ---------- 可视化 ----------
         # 批量实验时会显著拖慢速度且可能触发绘图边界问题，这里默认不在 train() 中生成空间因果可视化。
         
         print("\n>>>>>>> CRC 训练流程全部完成 <<<<<<<")
-        return self.hybrid_corrector
+        return self.corrector
 
     # ---- LTF 风格的 inverse：必要时在通道维做 tile → inverse → 裁回 ----
     def _inverse_like_ltf(self, arr, ref_cols, scaler):
@@ -325,7 +262,7 @@ class Exp_CRC(Exp_Long_Term_Forecast):
 
     def test(self, setting):
         print(">>>>>>> 开始 CRC 测试流程 <<<<<<<")
-        if self.hybrid_corrector is None or self.baseline_model is None:
+        if self.corrector is None or self.baseline_model is None:
             raise ValueError("模型尚未训练，请先调用 train()。")
 
         test_set, test_loader = self._get_data(flag='test')
@@ -333,13 +270,8 @@ class Exp_CRC(Exp_Long_Term_Forecast):
         print("在测试集上生成基线预测、真实标签和输入窗口...")
         yhat_te_bl, y_te, W_te = self._get_predictions(self.baseline_model, test_loader)  # (B,H,C_sel),(B,H,C_sel),(B,P,C_all)
 
-        # 仅在推理阶段应用 tau_scale：训练阶段始终使用原始 tau_map
-        tau_scale = float(getattr(self.args, "tau_scale", 1.0))
-        if hasattr(self.hybrid_corrector, "tau_scale"):
-            self.hybrid_corrector.tau_scale = tau_scale
-
-        print(f"使用 Hybrid Corrector 对基线预测进行校正 (tau_scale={tau_scale:.3f}) ...")
-        yfinal_te, nl_abs, clip_mask = self.hybrid_corrector.predict(
+        print("使用 ResidualCorrector 对基线预测进行校正 ...")
+        yfinal_te, nl_abs, clip_mask = self.corrector.predict(
             W_te, yhat_te_bl, return_nl_abs=True, return_clip_mask=True
         )  # nl_abs = |w2 * r_delta_c|；clip_mask = (|r_delta| > tau)
 

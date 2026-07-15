@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# DEPRECATED (Phase 3 / A6): tau_scale inference sweeps removed.
+# Tune safety boundary via --crc_tau_quantile and retrain stage-2 instead.
+# See spec/ablation_results.md (A6 REMOVABLE).
+#
 # Sweep tau_scale at inference time for a fixed q_val=3.
 # NOTE: tau_scale is applied only in HybridTrainer.predict; training always uses the
 # original tau_map estimated with quantile_q mapped from q_val=3.

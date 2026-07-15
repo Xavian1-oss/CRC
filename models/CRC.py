@@ -6,9 +6,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import matplotlib.pyplot as plt
-import networkx as nx
-from scipy.stats import spearmanr
 from copy import deepcopy
 
 
@@ -197,6 +194,57 @@ def build_physics_priors_ms(
         F_norm = ((Fg - mu_out) / sd_out).astype(np.float32)
         return F_norm, mu_out.astype(np.float32), sd_out.astype(np.float32), names
 
+
+def build_physics_priors_minimal(
+    W: np.ndarray,
+    A: np.ndarray,
+    ema_scale: int = 12,
+    use_robust: bool = True,
+    mu: Optional[np.ndarray] = None,
+    sd: Optional[np.ndarray] = None,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[str]]:
+    """Minimal physics priors: last, diff1, ema_s12 (+ neighbor aggregation)."""
+    assert W.ndim == 3, "W must be (B,P,N)"
+    B, P, N = W.shape
+    A = A.astype(np.float32)
+
+    last = W[:, -1, :]
+    prev = W[:, -2, :] if P >= 2 else W[:, -1, :]
+    diff1 = last - prev
+
+    s_eff = min(ema_scale, P)
+    xk = W[:, -s_eff:, :]
+    alpha = 2.0 / (s_eff + 1.0)
+    ema = np.zeros((B, N), dtype=np.float32)
+    for t in range(xk.shape[1]):
+        ema = xk[:, t, :] if t == 0 else alpha * xk[:, t, :] + (1 - alpha) * ema
+    ema = ema.astype(np.float32)
+
+    names = ["last", "diff1", f"ema_s{ema_scale}"]
+    F0 = np.stack([last, diff1, ema], axis=-1).astype(np.float32)
+
+    deg = A.sum(axis=1, keepdims=True).astype(np.float32)
+    deg = np.clip(deg, 1.0, None)
+    At = (A / deg).astype(np.float32).T
+    Fg = np.empty_like(F0, dtype=np.float32)
+    for k in range(F0.shape[-1]):
+        Fg[:, :, k] = F0[:, :, k] @ At
+
+    if (mu is not None) and (sd is not None):
+        F_norm = ((Fg - mu) / (sd + 1e-6)).astype(np.float32)
+        return F_norm, mu.astype(np.float32), sd.astype(np.float32), names
+
+    if use_robust:
+        med = np.median(Fg, axis=(0, 1), keepdims=True)
+        mad = np.median(np.abs(Fg - med), axis=(0, 1), keepdims=True) + 1e-6
+        F_norm = ((Fg - med) / mad).astype(np.float32)
+        return F_norm, med.astype(np.float32), mad.astype(np.float32), names
+
+    mu_out = Fg.mean(axis=(0, 1), keepdims=True)
+    sd_out = Fg.std(axis=(0, 1), keepdims=True) + 1e-6
+    F_norm = ((Fg - mu_out) / sd_out).astype(np.float32)
+    return F_norm, mu_out.astype(np.float32), sd_out.astype(np.float32), names
+
 # =========================
 # Encoder / MTL (uncertainty-weighted)
 # =========================
@@ -205,6 +253,23 @@ class ResidualBlock(nn.Module):
         super().__init__(); self.l = nn.Linear(i_d, o_d)
         self.s = nn.Linear(i_d, o_d) if i_d != o_d else nn.Identity()
     def forward(self, x): return F.relu(self.l(x) + self.s(x))
+
+
+class TemporalEncoder(nn.Module):
+    """Lightweight per-node temporal encoder (STCL candidate replacement)."""
+
+    def __init__(self, P: int, d: int, N: int):
+        super().__init__()
+        self.P, self.d, self.N = P, d, N
+        self.proj = nn.Linear(P, d)
+
+    def forward(self, W: torch.Tensor) -> torch.Tensor:
+        # W: (B, P, N) -> Z: (B, N, d)
+        B, P, N = W.shape
+        x = W.permute(0, 2, 1).reshape(B * N, P)
+        z = F.gelu(self.proj(x)).reshape(B, N, self.d)
+        return z
+
 
 class STCL_Core(nn.Module):
     def __init__(self, P, d, nl):
@@ -473,20 +538,23 @@ class HybridTrainer:
     def __init__(self, encoder, A, F_mu, F_sd, H: int, N: int, P: int,
                  l2_delta=1e-4, lr=1e-4, wd=1e-4, patience=20, max_epochs=60, batch_size=64,
                  node_emb_dim: int = 16, use_dir_gate: bool = True,
+                 use_blend_search: bool = True,
                  quantile_q: float = 0.80, improve_eps: float = 0.01,
                  scales: List[int] = [6,12,24,48],
                  freq_bands: List[Tuple[float,float]] = [(0.0,0.05),(0.05,0.15),(0.15,0.35)],
-                 use_robust: bool = True, top_m: Optional[int] = None):
+                 use_robust: bool = True, top_m: Optional[int] = None,
+                 prior_mode: str = "full"):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.encoder = deepcopy(encoder).to(self.device).eval()
         for p in self.encoder.parameters(): p.requires_grad = False
         self.A, self.F_mu, self.F_sd, self.H, self.N, self.P = A, F_mu, F_sd, H, N, P
         self.l2_delta, self.lr, self.wd = l2_delta, lr, wd
         self.patience, self.max_epochs, self.batch_size = patience, max_epochs, batch_size
-        self.use_dir_gate, self.quantile_q, self.improve_eps = use_dir_gate, quantile_q, improve_eps
+        self.use_dir_gate = use_dir_gate
+        self.use_blend_search = use_blend_search
+        self.quantile_q, self.improve_eps = quantile_q, improve_eps
         self.scales, self.freq_bands, self.use_robust, self.top_m = scales, freq_bands, use_robust, top_m
-        # tau_scale 仅在推理阶段使用，用于整体缩放安全边界 tau；训练阶段始终使用原始 tau_map
-        self.tau_scale: float = 1.0
+        self.prior_mode = prior_mode
         self.W_list_t: List[torch.Tensor] = []; self.tau_map = None   # (H,N)
         self.W_blend = None  # (N,H,2)
         self.linear_is_best = None
@@ -494,13 +562,20 @@ class HybridTrainer:
         self.shared_mlp = SmallMLP(d_in=1, H=H)  # placeholder; reset later
 
     # ---- feature encoding ----
-    def _encode_aug(self, W):
-        Z = encode_with_encoder(self.encoder, W, self.device)  # (B,N,d)
-        F_aug, _, _, _ = build_physics_priors_ms(
+    def _build_priors(self, W, R_train=None, mu=None, sd=None):
+        if self.prior_mode == "minimal":
+            return build_physics_priors_minimal(
+                W, self.A, use_robust=self.use_robust, mu=mu, sd=sd,
+            )
+        return build_physics_priors_ms(
             W, self.A, scales=self.scales, freq_bands=self.freq_bands,
             use_robust=self.use_robust, top_m=self.top_m,
-            R_train=None, mu=self.F_mu, sd=self.F_sd
-        )  # (B,N,f)
+            R_train=R_train, mu=mu, sd=sd,
+        )
+
+    def _encode_aug(self, W):
+        Z = encode_with_encoder(self.encoder, W, self.device)  # (B,N,d)
+        F_aug, _, _, _ = self._build_priors(W, mu=self.F_mu, sd=self.F_sd)
         return np.concatenate([Z, F_aug], axis=-1)  # (B,N,d+f)
 
     def _init_shared(self, d_aug: int, node_emb_dim: int):
@@ -534,10 +609,8 @@ class HybridTrainer:
     def train(self, W_tr, y_tr, yhat_tr, W_vl, y_vl, yhat_vl):
         # 1) 仅使用训练数据计算和设置先验统计量 (mu/sd)
         # 这一步是后续特征标准化的基础，必须首先进行。
-        _, F_mu, F_sd, _ = build_physics_priors_ms(
-            W_tr, self.A, scales=self.scales, freq_bands=self.freq_bands,
-            use_robust=self.use_robust, top_m=self.top_m, R_train=(y_tr - yhat_tr),
-            mu=None, sd=None
+        _, F_mu, F_sd, _ = self._build_priors(
+            W_tr, R_train=(y_tr - yhat_tr), mu=None, sd=None,
         )
         self.F_mu, self.F_sd = F_mu.astype(np.float32), F_sd.astype(np.float32)
 
@@ -618,30 +691,34 @@ class HybridTrainer:
         
         if best_state: self.shared_mlp.load_state_dict(best_state)
 
-        # 6) 进行融合权重校准 (直接使用已经创建的 Zvl_t)
-        print("[Hybrid] Calibrating per-(node,h) blending weights ...")
-        with torch.no_grad():
-            r_lin_v = self._r_linear(Zvl_t)
-            r_delta_v = self._r_delta(Zvl_t)
-            tau_v = self.tau_map.unsqueeze(0).expand_as(r_delta_v)
-            r_delta_v = torch.clamp(r_delta_v, -tau_v, tau_v)
-            base = yhvl_t; y_true = yvl_t
-            W_grid = [0.0, 0.25, 0.5, 0.75, 1.0]
-            self.W_blend = torch.zeros(self.N, self.H, 2, device=self.device)
-            base_mae_map = torch.mean(torch.abs(y_true - base), dim=0)
-            
-            for i in range(self.N):
-                for h in range(self.H):
-                    best_mae_ih = base_mae_map[h,i].item(); best_w = (0.0, 0.0)
-                    for w1 in W_grid:
-                        for w2 in W_grid:
-                            y_hat = base[:,h,i] + w1 * r_lin_v[:,h,i] + w2 * r_delta_v[:,h,i]
-                            m = torch.mean(torch.abs(y_true[:,h,i] - y_hat)).item()
-                            if m < best_mae_ih - 1e-12: best_mae_ih, best_w = m, (w1, w2)
-                    if best_mae_ih > base_mae_map[h,i].item() * (1 - self.improve_eps):
-                        best_w = (0.0, 0.0)
-                    self.W_blend[i,h,0], self.W_blend[i,h,1] = best_w[0], best_w[1]
-        print("[Hybrid] Blending calibration done.")
+        # 6) 融合权重校准或固定权重
+        if not self.use_blend_search:
+            self.W_blend = torch.ones(self.N, self.H, 2, device=self.device)
+            print("[Hybrid] Fixed blend weights w1=w2=1.0 (no grid search).")
+        else:
+            print("[Hybrid] Calibrating per-(node,h) blending weights ...")
+            with torch.no_grad():
+                r_lin_v = self._r_linear(Zvl_t)
+                r_delta_v = self._r_delta(Zvl_t)
+                tau_v = self.tau_map.unsqueeze(0).expand_as(r_delta_v)
+                r_delta_v = torch.clamp(r_delta_v, -tau_v, tau_v)
+                base = yhvl_t; y_true = yvl_t
+                W_grid = [0.0, 0.25, 0.5, 0.75, 1.0]
+                self.W_blend = torch.zeros(self.N, self.H, 2, device=self.device)
+                base_mae_map = torch.mean(torch.abs(y_true - base), dim=0)
+
+                for i in range(self.N):
+                    for h in range(self.H):
+                        best_mae_ih = base_mae_map[h,i].item(); best_w = (0.0, 0.0)
+                        for w1 in W_grid:
+                            for w2 in W_grid:
+                                y_hat = base[:,h,i] + w1 * r_lin_v[:,h,i] + w2 * r_delta_v[:,h,i]
+                                m = torch.mean(torch.abs(y_true[:,h,i] - y_hat)).item()
+                                if m < best_mae_ih - 1e-12: best_mae_ih, best_w = m, (w1, w2)
+                        if best_mae_ih > base_mae_map[h,i].item() * (1 - self.improve_eps):
+                            best_w = (0.0, 0.0)
+                        self.W_blend[i,h,0], self.W_blend[i,h,1] = best_w[0], best_w[1]
+            print("[Hybrid] Blending calibration done.")
 
     # ---- inference ----
     def predict(
@@ -657,7 +734,7 @@ class HybridTrainer:
         with torch.no_grad():
             r_lin = self._r_linear(Zt)
             r_delta = self._r_delta(Zt)
-            tau = self.tau_map.unsqueeze(0).expand_as(r_delta) * float(self.tau_scale)
+            tau = self.tau_map.unsqueeze(0).expand_as(r_delta)
             clip_mask = torch.abs(r_delta) > tau
             r_delta_c = torch.clamp(r_delta, -tau, tau)
             w1 = self.W_blend[:,:,0].permute(1,0).unsqueeze(0)  # (1,H,N)
@@ -672,3 +749,230 @@ class HybridTrainer:
         if return_clip_mask:
             return y_out, clip_mask.cpu().numpy()
         return y_out
+
+
+# =========================
+# CRCConfig + ResidualCorrector (Phase 1 wrapper)
+# =========================
+CRC_CHECKPOINT_VERSION = "crc-slim-v1"
+
+
+def q_val_to_quantile(q_val: int) -> float:
+    """Legacy mapping from integer q_val to tau quantile."""
+    q_int = int(q_val)
+    if q_int <= 1:
+        return 0.10
+    if q_int == 2:
+        return 0.30
+    if q_int == 3:
+        return 0.50
+    if q_int == 4:
+        return 0.70
+    return 0.90
+
+
+def resolve_crc_hparams(args) -> Tuple[int, float]:
+    """Resolve STCL layers and tau quantile from new CLI or legacy q_val."""
+    q_legacy = int(getattr(args, "q_val", 3))
+    enc_layers = getattr(args, "crc_encoder_layers", None)
+    tau_quantile = getattr(args, "crc_tau_quantile", None)
+    if enc_layers is None:
+        enc_layers = q_legacy
+    if tau_quantile is None:
+        tau_quantile = q_val_to_quantile(q_legacy)
+    return int(enc_layers), float(tau_quantile)
+
+
+@dataclass
+class CRCConfig:
+    """Feature flags default to legacy (all-on) behavior."""
+    use_mtl: bool = True
+    use_physics_priors: bool = True
+    use_dir_gate: bool = True
+    use_blend_search: bool = True
+    use_stcl_encoder: bool = True
+    minimal_priors: bool = False
+    tau_quantile: float = 0.5
+    encoder_layers: int = 3
+    graph_topk: int = 3
+
+    @classmethod
+    def from_args(cls, args) -> "CRCConfig":
+        enc_layers, tau_q = resolve_crc_hparams(args)
+        def _flag(name: str, default: bool = True) -> bool:
+            v = getattr(args, name, 1 if default else 0)
+            return bool(int(v))
+        return cls(
+            use_mtl=_flag("crc_use_mtl"),
+            use_physics_priors=_flag("crc_use_priors"),
+            use_dir_gate=_flag("crc_use_dir_gate"),
+            use_blend_search=_flag("crc_use_blend"),
+            use_stcl_encoder=_flag("crc_use_stcl"),
+            minimal_priors=_flag("crc_use_minimal_priors", default=False),
+            tau_quantile=tau_q,
+            encoder_layers=enc_layers,
+            graph_topk=int(getattr(args, "top_k", 3)),
+        )
+
+
+class ResidualCorrector:
+    """
+    Phase-A wrapper: orchestrates MTL pretrain + HybridTrainer with CRCConfig.
+    Behavior matches legacy HybridTrainer path when all flags are default-on.
+    """
+    VERSION = CRC_CHECKPOINT_VERSION
+
+    def __init__(
+        self,
+        config: CRCConfig,
+        A: np.ndarray,
+        H: int,
+        N: int,
+        P: int,
+        d_model: int,
+        enc_in: int,
+        *,
+        F_mu: Optional[np.ndarray] = None,
+        F_sd: Optional[np.ndarray] = None,
+    ):
+        self.config = config
+        self.A = A
+        self.H, self.N, self.P = H, N, P
+        self.d_model = d_model
+        self.enc_in = enc_in
+        self.F_mu = F_mu
+        self.F_sd = F_sd
+        self._hybrid: Optional[HybridTrainer] = None
+
+    @classmethod
+    def from_legacy_hybrid(cls, hybrid: HybridTrainer, config: Optional[CRCConfig] = None) -> "ResidualCorrector":
+        obj = cls.__new__(cls)
+        obj.config = config or CRCConfig()
+        obj._hybrid = hybrid
+        obj.A = hybrid.A
+        obj.H, obj.N, obj.P = hybrid.H, hybrid.N, hybrid.P
+        obj.d_model = hybrid.encoder.core.d if hasattr(hybrid.encoder, "core") else 64
+        obj.enc_in = hybrid.N
+        obj.F_mu, obj.F_sd = hybrid.F_mu, hybrid.F_sd
+        return obj
+
+    @property
+    def hybrid(self) -> HybridTrainer:
+        if self._hybrid is None:
+            raise RuntimeError("ResidualCorrector not trained or loaded.")
+        return self._hybrid
+
+    def train(
+        self,
+        W_tr: np.ndarray,
+        y_tr: np.ndarray,
+        yhat_tr: np.ndarray,
+        W_vl: np.ndarray,
+        y_vl: np.ndarray,
+        yhat_vl: np.ndarray,
+    ) -> None:
+        cfg = self.config
+        if cfg.use_stcl_encoder:
+            encoder = None
+            if cfg.use_mtl:
+                print("\n--- Stage A: MTL Pre-training ---")
+                pre_encoder = PretrainableEncoderMTL(
+                    self.A, self.P, self.H, self.enc_in,
+                    self.d_model, cfg.encoder_layers,
+                )
+                mtl_pretrain_trainer(
+                    pre_encoder,
+                    W_tr, y_tr, W_vl, y_vl, yhat_tr, yhat_vl,
+                    mask_ratio=0.0,
+                )
+                encoder = pre_encoder.encoder
+            else:
+                print("\n--- Stage A: MTL Pre-training SKIPPED (crc_use_mtl=0) ---")
+                pre_encoder = PretrainableEncoderMTL(
+                    self.A, self.P, self.H, self.enc_in,
+                    self.d_model, cfg.encoder_layers,
+                )
+                encoder = pre_encoder.encoder
+        else:
+            print("\n--- Stage A: TemporalEncoder (no STCL, crc_use_stcl=0) ---")
+            if cfg.use_mtl:
+                print("[CRC] Note: MTL pretrain skipped with TemporalEncoder (A5 ablation).")
+            encoder = TemporalEncoder(self.P, self.d_model, self.enc_in)
+
+        prior_mode = "minimal" if cfg.minimal_priors else "full"
+        print("\n--- Stage B: Hybrid Corrector ---")
+        if cfg.use_physics_priors:
+            if prior_mode == "minimal":
+                F_tr, F_mu, F_sd, _ = build_physics_priors_minimal(W_tr, self.A)
+                print(f"[Priors] Minimal priors dim = {F_tr.shape[-1]} (last, diff1, ema_12)")
+            else:
+                F_tr, F_mu, F_sd, _ = build_physics_priors_ms(
+                    W_tr, self.A,
+                    scales=[6, 12, 24, 48],
+                    freq_bands=[(0.0, 0.05), (0.05, 0.15), (0.15, 0.35)],
+                    use_robust=True,
+                    top_m=None,
+                    R_train=(y_tr - yhat_tr),
+                    mu=None, sd=None,
+                )
+                print(f"[Priors] 多尺度先验维度 = {F_tr.shape[-1]}")
+            self.F_mu, self.F_sd = F_mu, F_sd
+        else:
+            raise NotImplementedError("Disabling all priors is not supported.")
+
+        print(f"[Hybrid] Using safety quantile_q={cfg.tau_quantile:.2f} "
+              f"(encoder_layers={cfg.encoder_layers})")
+
+        hybrid = HybridTrainer(
+            encoder, self.A, F_mu=self.F_mu, F_sd=self.F_sd,
+            H=self.H, N=self.N, P=self.P,
+            node_emb_dim=16, use_dir_gate=cfg.use_dir_gate,
+            use_blend_search=cfg.use_blend_search,
+            quantile_q=cfg.tau_quantile, improve_eps=0.01,
+            scales=[6, 12, 24, 48],
+            freq_bands=[(0.0, 0.05), (0.05, 0.15), (0.15, 0.35)],
+            use_robust=True, top_m=None,
+            prior_mode=prior_mode,
+        )
+        hybrid.train(W_tr, y_tr, yhat_tr, W_vl, y_vl, yhat_vl)
+        self._hybrid = hybrid
+
+    def predict(self, W: np.ndarray, yhat: np.ndarray, **kwargs):
+        return self.hybrid.predict(W, yhat, **kwargs)
+
+
+def save_crc_checkpoint(path: str, corrector: ResidualCorrector) -> None:
+    payload = {
+        "version": ResidualCorrector.VERSION,
+        "config": corrector.config,
+        "hybrid": corrector.hybrid,
+    }
+    torch.save(payload, path)
+
+
+def load_crc_checkpoint(path: str, map_location=None) -> ResidualCorrector:
+    try:
+        obj = torch.load(path, map_location=map_location, weights_only=False)
+    except TypeError:
+        obj = torch.load(path, map_location=map_location)
+
+    if isinstance(obj, ResidualCorrector):
+        return obj
+    if isinstance(obj, HybridTrainer):
+        print(f"[CRC] Loaded legacy HybridTrainer checkpoint from {path}")
+        return ResidualCorrector.from_legacy_hybrid(obj)
+    if isinstance(obj, dict):
+        if "hybrid" in obj and isinstance(obj["hybrid"], HybridTrainer):
+            cfg = obj.get("config")
+            if cfg is None:
+                cfg = CRCConfig()
+            elif isinstance(cfg, dict):
+                cfg = CRCConfig(**cfg)
+            corrector = ResidualCorrector.from_legacy_hybrid(obj["hybrid"], cfg)
+            ver = obj.get("version", "unknown")
+            print(f"[CRC] Loaded checkpoint version={ver} from {path}")
+            return corrector
+    raise ValueError(
+        f"Unrecognized CRC checkpoint format at {path}. "
+        "Expected ResidualCorrector, HybridTrainer, or versioned dict."
+    )
