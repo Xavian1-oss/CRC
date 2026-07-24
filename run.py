@@ -13,11 +13,6 @@ import random
 import numpy as np
 
 if __name__ == '__main__':
-    fix_seed = 2021
-    random.seed(fix_seed)
-    torch.manual_seed(fix_seed)
-    np.random.seed(fix_seed)
-
     parser = argparse.ArgumentParser(description='TimesNet')
 
     # basic config
@@ -49,6 +44,8 @@ if __name__ == '__main__':
                         help='[CRC only] Enable physics priors (1=on, 0=off)')
     parser.add_argument('--crc_use_minimal_priors', type=int, default=0,
                         help='[CRC only] Use minimal priors (last/diff1/ema_12) instead of full multi-scale (ablation A4)')
+    parser.add_argument('--crc_ridge_gate_only', type=int, default=0,
+                        help='[CRC only] Ridge-only + validation gate (w1 in {0,1}, w2=0); skips MLP (G2 baseline)')
     parser.add_argument('--use_dtw', action='store_true', 
                     help='Whether to calculate DTW metric in test phase', 
                     default=False)
@@ -150,7 +147,9 @@ if __name__ == '__main__':
 
     # Augmentation
     parser.add_argument('--augmentation_ratio', type=int, default=0, help="How many times to augment")
-    parser.add_argument('--seed', type=int, default=2, help="Randomization seed")
+    parser.add_argument('--seed', type=int, default=2, help="Randomization seed (augmentation only)")
+    parser.add_argument('--fix_seed', type=int, default=2021,
+                        help='Global RNG seed for torch/random/numpy (CRC training)')
     parser.add_argument('--jitter', default=False, action="store_true", help="Jitter preset augmentation")
     parser.add_argument('--scaling', default=False, action="store_true", help="Scaling preset augmentation")
     parser.add_argument('--permutation', default=False, action="store_true",
@@ -173,7 +172,11 @@ if __name__ == '__main__':
     parser.add_argument('--extra_tag', type=str, default="", help="Anything extra")
 
     args = parser.parse_args()
-    
+
+    random.seed(args.fix_seed)
+    torch.manual_seed(args.fix_seed)
+    np.random.seed(args.fix_seed)
+
     # --- Device Setup ---
     if torch.cuda.is_available() and args.use_gpu:
         args.device = torch.device('cuda:{}'.format(args.gpu))

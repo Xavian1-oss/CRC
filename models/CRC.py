@@ -539,6 +539,7 @@ class HybridTrainer:
                  l2_delta=1e-4, lr=1e-4, wd=1e-4, patience=20, max_epochs=60, batch_size=64,
                  node_emb_dim: int = 16, use_dir_gate: bool = True,
                  use_blend_search: bool = True,
+                 ridge_gate_only: bool = False,
                  quantile_q: float = 0.80, improve_eps: float = 0.01,
                  scales: List[int] = [6,12,24,48],
                  freq_bands: List[Tuple[float,float]] = [(0.0,0.05),(0.05,0.15),(0.15,0.35)],
@@ -552,6 +553,7 @@ class HybridTrainer:
         self.patience, self.max_epochs, self.batch_size = patience, max_epochs, batch_size
         self.use_dir_gate = use_dir_gate
         self.use_blend_search = use_blend_search
+        self.ridge_gate_only = ridge_gate_only
         self.quantile_q, self.improve_eps = quantile_q, improve_eps
         self.scales, self.freq_bands, self.use_robust, self.top_m = scales, freq_bands, use_robust, top_m
         self.prior_mode = prior_mode
@@ -644,55 +646,77 @@ class HybridTrainer:
         tau_np = np.quantile(abs_res.cpu().numpy(), self.quantile_q, axis=0)
         self.tau_map = torch.from_numpy(tau_np.astype(np.float32)).to(self.device)
 
-        # 5) 训练共享的非线性修正 MLP
-        # 直接使用缓存的 Z_tr_aug 创建数据加载器
-        tr_ds = torch.utils.data.TensorDataset(*(torch.from_numpy(d) for d in [Z_tr_aug, y_tr, yhat_tr]))
-        tr_dl = torch.utils.data.DataLoader(tr_ds, batch_size=self.batch_size, shuffle=True)
-        
-        opt = torch.optim.Adam(self.shared_mlp.parameters(), lr=self.lr, weight_decay=self.wd)
-        best_mae, best_state, bad_epochs = val_mae_lin, deepcopy(self.shared_mlp.state_dict()), 0
-        self.linear_is_best = torch.ones(self.N, self.H, dtype=torch.bool, device=self.device)
+        # 5) 训练共享的非线性修正 MLP（ridge_gate_only 时跳过）
+        if self.ridge_gate_only:
+            print("[Hybrid] Ridge-gate-only mode: skipping MLP training.")
+        else:
+            tr_ds = torch.utils.data.TensorDataset(*(torch.from_numpy(d) for d in [Z_tr_aug, y_tr, yhat_tr]))
+            tr_dl = torch.utils.data.DataLoader(tr_ds, batch_size=self.batch_size, shuffle=True)
 
-        for ep in range(1, self.max_epochs + 1):
-            self.shared_mlp.train()
-            for Zb, yb, yh_b in tr_dl:
-                Zb, yb, yh_b = Zb.to(self.device), yb.to(self.device), yh_b.to(self.device)
-                opt.zero_grad()
-                r_lin = self._r_linear(Zb.detach())
-                r_delta = self._r_delta(Zb)
-                tau = self.tau_map.unsqueeze(0).expand_as(r_delta)
-                r_delta_c = self._apply_dir_gate(r_delta, yb, yh_b, r_lin, tau)
-                y_f = yh_b.detach() + r_lin + r_delta_c
-                loss = F.l1_loss(y_f, yb) + self.l2_delta * (r_delta_c**2).mean()
-                loss.backward(); opt.step()
+            opt = torch.optim.Adam(self.shared_mlp.parameters(), lr=self.lr, weight_decay=self.wd)
+            best_mae, best_state, bad_epochs = val_mae_lin, deepcopy(self.shared_mlp.state_dict()), 0
+            self.linear_is_best = torch.ones(self.N, self.H, dtype=torch.bool, device=self.device)
 
-            # 在验证集上进行评估 (直接使用已经创建的 Zvl_t)
-            self.shared_mlp.eval()
-            with torch.no_grad():
-                r_lin_v = self._r_linear(Zvl_t)
-                r_delta_v = self._r_delta(Zvl_t)
-                tau_v = self.tau_map.unsqueeze(0).expand_as(r_delta_v)
-                r_delta_v = torch.clamp(r_delta_v, -tau_v, tau_v)
-                y_lin = yhvl_t + r_lin_v
-                y_hyb = y_lin + r_delta_v
-                err_lin = torch.mean(torch.abs(yvl_t - y_lin), dim=0)
-                err_hyb = torch.mean(torch.abs(yvl_t - y_hyb), dim=0)
-                better_hyb = (err_hyb + 1e-8) < (err_lin * (1 - self.improve_eps))
-                self.linear_is_best = (~better_hyb).permute(1,0).contiguous()
-                mae_v_mix = torch.mean(torch.where(better_hyb, err_hyb, err_lin)).item()
-            print(f"[Hybrid] Epoch {ep:03d}: Val MAE (mixed)={mae_v_mix:.4f}")
+            for ep in range(1, self.max_epochs + 1):
+                self.shared_mlp.train()
+                for Zb, yb, yh_b in tr_dl:
+                    Zb, yb, yh_b = Zb.to(self.device), yb.to(self.device), yh_b.to(self.device)
+                    opt.zero_grad()
+                    r_lin = self._r_linear(Zb.detach())
+                    r_delta = self._r_delta(Zb)
+                    tau = self.tau_map.unsqueeze(0).expand_as(r_delta)
+                    r_delta_c = self._apply_dir_gate(r_delta, yb, yh_b, r_lin, tau)
+                    y_f = yh_b.detach() + r_lin + r_delta_c
+                    loss = F.l1_loss(y_f, yb) + self.l2_delta * (r_delta_c**2).mean()
+                    loss.backward(); opt.step()
 
-            if mae_v_mix < best_mae:
-                best_mae, best_state, bad_epochs = mae_v_mix, deepcopy(self.shared_mlp.state_dict()), 0
-            else:
-                bad_epochs += 1
-                if bad_epochs >= self.patience:
-                    print(f"Early stopping at epoch {ep}."); break
-        
-        if best_state: self.shared_mlp.load_state_dict(best_state)
+                self.shared_mlp.eval()
+                with torch.no_grad():
+                    r_lin_v = self._r_linear(Zvl_t)
+                    r_delta_v = self._r_delta(Zvl_t)
+                    tau_v = self.tau_map.unsqueeze(0).expand_as(r_delta_v)
+                    r_delta_v = torch.clamp(r_delta_v, -tau_v, tau_v)
+                    y_lin = yhvl_t + r_lin_v
+                    y_hyb = y_lin + r_delta_v
+                    err_lin = torch.mean(torch.abs(yvl_t - y_lin), dim=0)
+                    err_hyb = torch.mean(torch.abs(yvl_t - y_hyb), dim=0)
+                    better_hyb = (err_hyb + 1e-8) < (err_lin * (1 - self.improve_eps))
+                    self.linear_is_best = (~better_hyb).permute(1,0).contiguous()
+                    mae_v_mix = torch.mean(torch.where(better_hyb, err_hyb, err_lin)).item()
+                print(f"[Hybrid] Epoch {ep:03d}: Val MAE (mixed)={mae_v_mix:.4f}")
+
+                if mae_v_mix < best_mae:
+                    best_mae, best_state, bad_epochs = mae_v_mix, deepcopy(self.shared_mlp.state_dict()), 0
+                else:
+                    bad_epochs += 1
+                    if bad_epochs >= self.patience:
+                        print(f"Early stopping at epoch {ep}."); break
+
+            if best_state: self.shared_mlp.load_state_dict(best_state)
 
         # 6) 融合权重校准或固定权重
-        if not self.use_blend_search:
+        if self.ridge_gate_only:
+            print("[Hybrid] Calibrating ridge-only validation gate (w1 in {0,1}, w2=0) ...")
+            with torch.no_grad():
+                r_lin_v = self._r_linear(Zvl_t)
+                base = yhvl_t
+                y_true = yvl_t
+                self.W_blend = torch.zeros(self.N, self.H, 2, device=self.device)
+                base_mae_map = torch.mean(torch.abs(y_true - base), dim=0)
+                for i in range(self.N):
+                    for h in range(self.H):
+                        best_mae_ih = base_mae_map[h, i].item()
+                        best_w1 = 0.0
+                        for w1 in (0.0, 1.0):
+                            y_hat = base[:, h, i] + w1 * r_lin_v[:, h, i]
+                            m = torch.mean(torch.abs(y_true[:, h, i] - y_hat)).item()
+                            if m < best_mae_ih - 1e-12:
+                                best_mae_ih, best_w1 = m, w1
+                        if best_mae_ih > base_mae_map[h, i].item() * (1 - self.improve_eps):
+                            best_w1 = 0.0
+                        self.W_blend[i, h, 0], self.W_blend[i, h, 1] = best_w1, 0.0
+            print("[Hybrid] Ridge-gate calibration done.")
+        elif not self.use_blend_search:
             self.W_blend = torch.ones(self.N, self.H, 2, device=self.device)
             print("[Hybrid] Fixed blend weights w1=w2=1.0 (no grid search).")
         else:
@@ -792,6 +816,7 @@ class CRCConfig:
     use_blend_search: bool = True
     use_stcl_encoder: bool = True
     minimal_priors: bool = False
+    ridge_gate_only: bool = False
     tau_quantile: float = 0.5
     encoder_layers: int = 3
     graph_topk: int = 3
@@ -809,6 +834,7 @@ class CRCConfig:
             use_blend_search=_flag("crc_use_blend"),
             use_stcl_encoder=_flag("crc_use_stcl"),
             minimal_priors=_flag("crc_use_minimal_priors", default=False),
+            ridge_gate_only=_flag("crc_ridge_gate_only", default=False),
             tau_quantile=tau_q,
             encoder_layers=enc_layers,
             graph_topk=int(getattr(args, "top_k", 3)),
@@ -928,6 +954,7 @@ class ResidualCorrector:
             H=self.H, N=self.N, P=self.P,
             node_emb_dim=16, use_dir_gate=cfg.use_dir_gate,
             use_blend_search=cfg.use_blend_search,
+            ridge_gate_only=cfg.ridge_gate_only,
             quantile_q=cfg.tau_quantile, improve_eps=0.01,
             scales=[6, 12, 24, 48],
             freq_bands=[(0.0, 0.05), (0.05, 0.15), (0.15, 0.35)],
