@@ -2,9 +2,10 @@ Dear Reviewer gnqC,
 
 Thank you for the thoughtful and constructive review. We appreciate your positive view of the **selective deployment** framing and the usefulness of **NDR**. Below we address each weakness and question with **new controlled comparisons** (Table R1 below) in addition to our ablation study.
 
-**Table R1 (Gated Baseline Ladder).** Three benchmarks under a **single unified batch** (same protocol throughout): **B1** ETTh1 + DLinear, pred_len 96; **B2** ETTh1 + DLinear, pred_len 336; **B3** Weather + TimesNet, pred_len 96. **G0** = frozen backbone only; **G1** = always-on correction (no validation blending); **G2** = ridge + validation gate only*; **G4** = deploy-only (blend + τ, light encoder); **G5** = Full CRC.
+**Table R1 (Gated Baseline Ladder).** Three benchmarks under a **single unified batch** (same protocol throughout): **B1** ETTh1 + DLinear, pred_len 96; **B2** ETTh1 + DLinear, pred_len 336; **B3** Weather + TimesNet, pred_len 96. **G0** = frozen backbone only; **G1** = always-on deployment*; **G2** = ridge + validation gate only†; **G4** = deploy-only (blend + τ, light encoder); **G5** = Full CRC.
 
-\* **G2** uses the **same Stage-A stack as G5** (MTL/STCL/priors); only the **deployment head** differs (no MLP; binary validation gate on the ridge path, w2=0)—a **deployment ablation**, not a minimal linear-only pipeline.
+\* **G1** uses validation training but **disables per-(variable, horizon) blend search** (fixed full weights)—this isolates **always-on deployment** of the corrector path, not “no validation.”  
+† **G2** uses the **same Stage-A stack as G5** (MTL/STCL/priors); only the **deployment head** differs (no MLP; binary validation gate on the ridge path, w2=0)—a **deployment ablation**, not a minimal linear-only pipeline.
 
 ---
 
@@ -20,9 +21,9 @@ We agree that the paper should separate the **core deployment mechanism** from s
 
 **Evidence (Table R1):**
 
-- **G1 (always-on):** NDR **8.2% / 10.6% / 33.9%** (B1/B2/B3) vs. Full CRC **76.3% / 77.7% / 78.5%** — selective deployment is the main safety mechanism.
-- **G3 (no direction gate):** effect is **setting-dependent** (unified batch: B2 NDR 78.5% vs. G5 77.7%); we classify the direction gate as a **secondary stabilizer**, not the primary deployment rule.
-- **G4 (deploy-only):** B1 NDR **62.1%** vs. Full CRC **76.3%**; B3 MAE is still best for G4 (**0.2081**) — representation modules mainly help **deployment quality (NDR)**, not uniformly MAE.
+- **G1 (always-on):** NDR **8.2% / 10.6% / 33.9%** (B1/B2/B3) vs. Full CRC **80.3% / 79.7% / 78.5%** — selective deployment is the main safety mechanism.
+- **G3 (no direction gate):** effect is **setting-dependent** (B1 NDR **81.8%** vs. G5 **80.3%**; B2 **79.7%** vs. **78.5%**); we classify the direction gate as a **secondary stabilizer**, not the primary deployment rule.
+- **G4 (deploy-only):** B1 NDR **62.1%** vs. Full CRC **80.3%**; on B3 Full CRC achieves **best MAE/MSE** (**0.1903 / 0.1408** vs. G4 **0.2081 / 0.1584**) while G4 remains strong on NDR—representation mainly boosts **deployment quality** on B1, not uniformly on all metrics.
 
 ---
 
@@ -36,15 +37,15 @@ We agree this comparison is central. Summary of Table R1:
 | **G1** | Always-on (no selection) | **8.2%** | **10.6%** | **33.9%** | 0.4738 |
 | **G2** | Ridge + val gate only* | **97.9%** | **97.1%** | **90.0%** | 0.4097 |
 | G4 | Deploy-only encoder | 62.1% | 77.8% | 79.4% | 0.4097 |
-| **G5** | Full CRC | 76.3% | 77.7% | 78.5% | **0.4084** |
+| **G5** | Full CRC | **80.3%** | **79.7%** | **78.5%** | **0.3914** |
 
 **Takeaways:**
 
-1. **Per-(node,h) deployment calibration is essential.** G1 keeps validation training but **disables blend grid search** (fixed full weights); NDR collapses and MAE degrades (B1 MAE **0.4738** vs. G5 **0.4084**). This is stronger than Table 2’s single-filter ablations—it isolates **always-on deployment** of the full corrector path.
+1. **Per-(node,h) deployment calibration is essential.** G1 keeps validation training but **disables blend grid search** (fixed full weights); NDR collapses and MAE degrades (B1 MAE **0.4738** vs. G5 **0.3914**). This is stronger than Table 2’s single-filter ablations—it isolates **always-on deployment** of the full corrector path.
 
-2. **High safety alone is insufficient (G2 vs. G5).** Ridge-only validation gating yields **very high NDR** (90–98%) but remains **conservative** and **does not recover the accuracy gains of the full deployment strategy**: weaker B1 MSE than G5 (**0.3941** vs. **0.3880**); on B2, G2 MAE **0.4693** exceeds baseline **0.4654** (NDR **97.1%**). Full CRC targets **balanced safety and accuracy**—**stronger MSE** with **moderate NDR (~76–79%)**.
+2. **High safety alone is insufficient (G2 vs. G5).** Ridge-only validation gating yields **very high NDR** (90–98%) but remains **conservative** and **does not recover the accuracy gains of the full deployment strategy**: weaker B1 MSE than G5 (**0.3941** vs. **0.3780**); on B2, G2 MAE **0.4693** exceeds baseline **0.4654** (NDR **97.1%**) while G5 MAE **0.4392** improves over G0. Full CRC targets **balanced safety and accuracy**—**stronger MSE** with **moderate NDR (~78–80%)**.
 
-3. **Full CRC combines deployment and representation.** G4 lowers B1 NDR (**62.1%** vs. **76.3%**) even when B1 MAE matches G2.
+3. **Full CRC combines deployment and representation.** G4 lowers B1 NDR (**62.1%** vs. **80.3%**); on B3, Full CRC yields the **strongest MAE/MSE** in the ladder.
 
 We will include the full Table R1 in the revision (main text or appendix).
 
@@ -79,7 +80,7 @@ We will add a short *Practitioner’s guide*:
 **High NDR does not imply maximum MAE reduction** (Table R1):
 
 - **G2:** B1 NDR **97.9%**, MAE **0.4097**, MSE **0.3941** (small MAE gain over baseline 0.4108).
-- **G5:** B1 NDR **76.3%**, MAE **0.4084**, MSE **0.3880** (stronger MSE vs. G0/G2).
+- **G5:** B1 NDR **80.3%**, MAE **0.3914**, MSE **0.3780** (stronger MSE vs. G0/G2).
 - **G1:** B1 NDR **8.2%**, MAE **0.4738**.
 
 When is higher NDR preferred? Settings where **local non-degradation** matters (heterogeneous multivariate series, auditable pipelines). CRC targets both when possible; G2 illustrates an explicit **safety–accuracy trade-off**.

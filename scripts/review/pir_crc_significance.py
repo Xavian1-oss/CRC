@@ -75,6 +75,11 @@ def main() -> None:
         default=Path("logs/multi_PIR_20251119_170802/results_summary_detailed.csv"),
     )
     ap.add_argument("--out", type=Path, default=Path("review_spec/r14_e2_pir_crc_significance.md"))
+    ap.add_argument(
+        "--summary-only",
+        action="store_true",
+        help="Omit per-cell CSV block (rebuttal default; use --no-summary-only style via omitting flag for full export)",
+    )
     args = ap.parse_args()
 
     crc = load_crc(args.crc_csv)
@@ -120,11 +125,12 @@ def main() -> None:
             f"{bootstrap_ci(mse_diffs)[1]:+.4f}] | {wilcox_mse.pvalue:.4g} | "
             f"{n_crc_better_mse}/{n_total} |"
         )
-    lines.extend(["", "## Per-cell ΔMAE (PIR − CRC)", ""])
-    show = merged[
-        ["dataset", "model", "horizon", "crc_mae", "pir_mae", "delta_mae", "delta_mse"]
-    ]
-    lines.append(show.to_csv(index=False))
+    if not args.summary_only:
+        lines.extend(["", "## Per-cell ΔMAE (PIR − CRC)", ""])
+        show = merged[
+            ["dataset", "model", "horizon", "crc_mae", "pir_mae", "delta_mae", "delta_mse"]
+        ]
+        lines.append(show.to_csv(index=False))
     args.out.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"Wrote {args.out} ({n_total} pairs)")
 

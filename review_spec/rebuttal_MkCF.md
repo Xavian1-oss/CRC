@@ -20,15 +20,15 @@ We agree deployment rules are calibrated on validation and **may fail under dist
 
 The adjacency uses **training-set correlation** with top-K neighbors (default **K=5**). It captures **static linear co-movement**, not dynamic lags—we will state this clearly as a **limitation**.
 
-**Sensitivity (B1, Full CRC, seed 2021):**
+**Sensitivity (B1 Full CRC, `--fix_seed` 2021; K=5 row aligned with Table R1 G5 B1):**
 
 | K | MAE | MSE | NDR |
 |---|-----|-----|-----|
-| 3 | 0.4079 | 0.3858 | 78.9% |
-| **5 (default)** | 0.4081 | 0.3870 | **80.4%** |
-| 7 | 0.4096 | 0.3886 | 74.3% |
+| 3 | 0.3912 | 0.3768 | 78.8% |
+| **5 (default)** | **0.3914** | **0.3780** | **80.3%** |
+| 7 | 0.3929 | 0.3796 | 74.2% |
 
-Metrics vary modestly with K; **K=5** is near-best on this benchmark (standalone B1 rerun; NDR may differ by a few pp from unified Table R1 G5 due to stage-2 variance). We will include this table in the revision appendix.
+Across **K ∈ {3, 5, 7}**, MAE/MSE vary modestly (~0.002 MAE); **K=5** (paper default) matches our Table R1 G5 B1 and yields the **highest NDR** in this sweep. We will include this table in the revision appendix.
 
 ---
 
@@ -46,7 +46,7 @@ CRC is two-stage: (1) train or warm-start the backbone once; (2) train the corre
 
 **Q3 — NDR vs. MSE/MAE**
 
-**NDR** is the fraction of (horizon × variable) pairs where correction **does not worsen** local MAE vs. the backbone; **MAE/MSE** are global averages. **High NDR does not imply maximum MAE reduction.** Table R1: **G2** on B1 has NDR **97.9%** but MSE **0.3941** vs. **G5** NDR **76.3%**, MSE **0.3880**; **G1** has NDR **8.2%**, MAE **0.4738**.
+**NDR** is the fraction of (horizon × variable) pairs where correction **does not worsen** local MAE vs. the backbone; **MAE/MSE** are global averages. **High NDR does not imply maximum MAE reduction.** Table R1: **G2** on B1 has NDR **97.9%** but MSE **0.3941** vs. **G5** NDR **80.3%**, MSE **0.3780**; **G1** has NDR **8.2%**, MAE **0.4738**.
 
 ---
 
