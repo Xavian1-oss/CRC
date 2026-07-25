@@ -29,7 +29,7 @@
 |----|------|------|
 | RG-1 | 粘贴 OpenReview rebuttal | [ ] |
 
-> 正文：`review_spec/rebuttal_gnqC.md`（=`rebuttal_r1.md`）
+> 正文：`review_spec/rebuttal_gnqC.md`
 
 ---
 
@@ -37,7 +37,7 @@
 
 | ID | 任务 | 状态 | 验收 |
 |----|------|------|------|
-| RV-1 | 撰写 `rebuttal_vaUX.md` | [ ] | G0/G1/G5 三选一叙事 |
+| RV-1 | 撰写 `rebuttal_vaUX.md` | [x] | G0/G1/G5 三选一叙事 |
 | RV-2 | 回应校准集 / 背景 / Table1 NDR | [ ] | revision 承诺 |
 | RV-3 | OpenReview 提交 | [ ] | |
 
@@ -47,7 +47,7 @@
 
 | ID | 任务 | 状态 | 验收 |
 |----|------|------|------|
-| R14-1 | 撰写 `rebuttal_14dv.md` | [ ] | 承诺 seed + PIR 检验 |
+| R14-1 | 撰写 `rebuttal_14dv.md` | [x] | 承诺 seed + PIR 检验 |
 | R14-2 | **R14-E1** multi-seed（B1 G5+G1 最小） | [x] | `rebuttal_results.md` §Seeds |
 | R14-3 | **R14-E2** PIR 显著性脚本/表 | [x] | `r14_e2_pir_crc_significance.md` |
 | R14-4 | OpenReview 提交 | [ ] | |
@@ -58,7 +58,7 @@
 
 | ID | 任务 | 状态 |
 |----|------|------|
-| RM-1 | 撰写 `rebuttal_MkCF.md` | [ ] |
+| RM-1 | 撰写 `rebuttal_MkCF.md` | [x] |
 | RM-2 | **RMK-E1** top_k sweep B1 | [x] |
 | RM-3 | OpenReview 提交 | [ ] |
 
@@ -68,7 +68,7 @@
 
 | ID | 任务 | 状态 |
 |----|------|------|
-| RAC-1 | 撰写 `rebuttal_AC.md`（AC-Q1/Q2 + Meta） | [ ] |
+| RAC-1 | 撰写 `rebuttal_AC.md`（AC-Q1/Q2 + Meta） | [x] |
 | RAC-2 | 粘贴至 OpenReview（Author-AC 或 discussion） | [ ] |
 
 ---

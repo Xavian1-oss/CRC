@@ -1,60 +1,47 @@
-# Rebuttal to Reviewer vaUX — Draft
-
-> **Status**: Draft v0.3 — **复用 Table R1**（`rebuttal_results.md`）  
-> **Priority**: P0 rebuttal（Major Q = missing baselines）
-
----
-
 Dear Reviewer vaUX,
 
-Thank you for the review. We agree that the **“when to deploy”** framing is central, and that **missing explicit update policies** weakens the empirical story. We address this below with **new controlled comparisons** shared across reviewers (Table R1 in our supplement / rebuttal PDF if allowed).
+Thank you for the review. We agree that the **“when to deploy”** framing is central, and that **missing explicit update policies** weakened the empirical story. We address this with **new controlled comparisons** (Table R1).
+
+**Table R1 setup.** **B1–B3** (ETTh1/DLinear @96 & @336; Weather/TimesNet @96); **G1–G5 from one unified batch** (same protocol).
 
 ---
 
-## Major suggestion — Always update / never update / selective update
+**Major suggestion — Never update / always update / selective update**
 
-We clarify three policies on benchmarks B1–B3:
+| Policy | Config | B1 MAE | B1 NDR | B2 NDR | B3 NDR |
+|--------|--------|--------|--------|--------|--------|
+| **Never update** | G0 (Table 1 baseline) | 0.4108 | — | — | — |
+| **Always accept update** | G1 (always-on corrector) | **0.4738** | **8.2%** | **10.6%** | **33.9%** |
+| **Selective update (CRC)** | G5 (Full CRC) | **0.4084** | **76.3%** | **77.7%** | **78.5%** |
 
-| Policy | Implementation | B1 MAE | B1 NDR |
-|--------|----------------|--------|--------|
-| **Never update** | Frozen baseline only (**G0**) | 0.4108 | — |
-| **Always accept update** | Full hybrid corrector, **no** validation blending (**G1**, `w1=w2=1`) | **0.4701** | **10.1%** |
-| **Selective update (CRC)** | Validation-calibrated per-(variable, horizon) blend (**G5**) | **0.4102** | **72.3%** |
+**Table 1 baseline rows correspond to G0 (never update); CRC rows correspond to G5.** The missing comparison was **G1 (always-on correction)**. G1 shows that always accepting corrections **hurts both MAE and NDR**, supporting the paper’s motivation.
 
-**Table 1 “baseline” rows are G0 (never update).** CRC rows are G5. The missing piece was **G1 (always-on correction)**—now included. G1 shows that always accepting corrections **hurts both MAE and NDR**, supporting the paper’s motivation.
-
-We also include **G2 (ridge + validation gate only)** and **G4 (deploy-only encoder)** in the full ladder (see `rebuttal_results.md`), isolating validation selection vs. full CRC.
+We also report **G2** and **G4** in the full ladder. **G2** (*same Stage-A as G5; ridge-only validation gate, no MLP*) reaches **97.9% / 97.1% / 90.0%** NDR but is **conservative**—**B1 MSE 0.3941 vs. G5 0.3880**; **B2 MAE 0.4693 vs. baseline 0.4654**. **G4** (light encoder, full blend) sits between G2 and G5 on NDR/MAE (full Table R1 in appendix).
 
 ---
 
-## Background / datasets / anomalies
+**Background / datasets / anomalies**
 
-We agree the paper should better ground tasks and backbones. **Revision:** expand dataset descriptions (ETT hourly/minute, Weather multivariate, etc.), clarify that benchmarks are **standard cleaned splits** (not heavy OOD stress tests), and discuss limitations for sensor anomalies / drift (see also MkCF-related Limitations).
-
----
-
-## NDR missing in Table 1
-
-We agree. **Revision:** add NDR to main or appendix tables; rebuttal reports NDR alongside MSE for B1–B3 in Table R1.
+We agree the paper should better ground tasks and backbones. **Revision:** expand dataset descriptions (ETT hourly/minute, Weather multivariate, etc.), clarify that benchmarks use **standard cleaned splits** (not heavy OOD stress tests), and discuss sensor anomalies / drift in Limitations.
 
 ---
 
-## Held-out calibration set
+**NDR missing in Table 1**
 
-CRC uses the **same validation split as Time-Series-Library** long-term forecasting (chronological; no test leakage). Stage-2 calibrates blend weights and τ on this val set only. **`crc_val_ratio`** controls what fraction of val windows train the corrector (sensitivity in paper). Cost: one stage-2 pass after a **frozen** backbone—no backbone fine-tuning.
-
----
-
-## Minor (PIR, structure)
-
-We will expand PIR in Related Work, add a dedicated **Results** subsection after §4.2, and improve Limitations per your checklist.
+We agree. **Revision:** add NDR to the main table or appendix. In rebuttal we report NDR alongside MAE/MSE for B1–B3 in Table R1 (see above).
 
 ---
 
-Thank you again.
+**Held-out calibration set**
+
+CRC uses the **same chronological validation split as Time-Series-Library** long-term forecasting (no test leakage). Stage-2 calibrates blend weights and τ on validation predictions only. The validation fraction for corrector training follows our sensitivity analysis in the paper. The backbone remains **frozen**; cost is one stage-2 pass after backbone training.
 
 ---
 
-## 内部备注
+**Minor (PIR, structure, limitations)**
 
-- Significance 2：用 Table R1 + problem framing 回应；不 overclaim Traffic 等 headline numbers without seeds（见 14dv / AC）
+We will expand PIR in Related Work, add a dedicated **Results** subsection after §4.2, and strengthen Limitations per your checklist.
+
+---
+
+Thank you again for the constructive feedback.

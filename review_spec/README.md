@@ -8,7 +8,7 @@ NeurIPS 2026 #7852 rebuttal / revision 工作区（v0.3）。
 | `design.md` | Table R1 实现、seed/PIR/K 设计 |
 | `task.md` | 任务勾选与执行顺序 |
 | `rebuttal_results.md` | **Table R1** 与实验 backlog |
-| `rebuttal_gnqC.md` | Reviewer gnqC（= `rebuttal_r1.md` 别名） |
+| `rebuttal_gnqC.md` | Reviewer **gnqC**（OpenReview） |
 | `rebuttal_vaUX.md` | Reviewer vaUX |
 | `rebuttal_14dv.md` | Reviewer 14dv |
 | `rebuttal_MkCF.md` | Reviewer MkCF |

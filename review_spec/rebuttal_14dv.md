@@ -1,40 +1,36 @@
-# Rebuttal to Reviewer 14dv — Draft
-
-> **Status**: Draft v0.3  
-> **Rating**: 5 Accept — weaknesses are **reporting**, not conceptual
-
----
-
 Dear Reviewer 14dv,
 
 Thank you for the strong support and clear summary of CRC. We address the two reporting gaps below.
 
 ---
 
-## Q1 — Variability across seeds
+**Q1 — Variability across seeds**
 
-We agree. **Revision:** we will report **mean ± std** (≥3 seeds) for Full CRC and key baselines on representative dataset–backbone pairs (at minimum ETTh1/DLinear and Weather/TimesNet from our internal B1–B3 ladder).
+We agree. **Revision:** we will report **mean ± std** over ≥3 seeds for Full CRC and key baselines on representative dataset–backbone pairs (at minimum ETTh1/DLinear and Weather/TimesNet).
 
-**Rebuttal-period status:** We completed **R14-E1** on B1 (ETTh1/DLinear/pl=96): over seeds {2021,2022,2023}, Full CRC (G5) gives **MAE 0.4091±0.0011** and **NDR 72.3±6.3%**; always-on (G1) gives **MAE 0.4828±0.0131** and **NDR 7.2±1.5%** (see `review_spec/rebuttal_results.md` §Multi-seed). This confirms the Table R1 gap is **stable across seeds**, not a single-seed artifact.
+**Rebuttal preview (B1; same CLI as unified Table R1):** In the **unified batch** (seed 2021), G5/G1 give MAE **0.4084** / **0.4738** and NDR **76.3%** / **8.2%**. **Additional three-seed reruns** give G5 MAE **0.4091 ± 0.0011** and NDR **72.3 ± 6.3%** (stage-2 variance); G1 remains **7.2 ± 1.5%** NDR with much higher MAE. The **G1 vs. G5 gap** is stable qualitatively across seeds.
+
+| Config | MAE (mean ± std) | NDR (mean ± std) |
+|--------|------------------|------------------|
+| Full CRC (G5) | **0.4091 ± 0.0011** | **72.3 ± 6.3%** |
+| Always-on (G1) | 0.4828 ± 0.0131 | 7.2 ± 1.5% |
+
+G5 MAE is stable across seeds; the **large G1 vs. G5 gap in MAE and NDR** is consistent across seeds—not a single-seed artifact. We will extend multi-seed reporting to additional settings in the camera-ready.
 
 ---
 
-## Q2 — Statistical significance vs. PIR (Table 3)
+**Q2 — Statistical significance vs. PIR (Table 3)**
 
-We will add **paired statistical analysis** across datasets/horizons (e.g., bootstrap 95% CI on MAE/MSE differences, or Wilcoxon signed-rank on paired errors). **Rebuttal preview:** on 64 paired cells from our internal CRC/PIR batch logs, aggregate Wilcoxon tests do **not** show CRC uniformly dominating PIR on MAE alone (see `review_spec/r14_e2_pir_crc_significance.md`); **revision** will report **per-cell** significance, effect sizes, and pair with **NDR** (unavailable for PIR in our protocol).
+We will add **paired statistical analysis** across datasets and horizons (bootstrap 95% CI on MAE/MSE differences and/or Wilcoxon signed-rank tests).
 
-We will not overclaim significance where effect sizes are negligible (consistent with your reading that weaknesses are reporting-related).
+**Rebuttal preview:** On **64 paired cells** from our internal CRC and PIR runs (matched dataset × backbone × horizon), aggregate Wilcoxon tests on MAE **do not** show CRC uniformly dominating PIR (**34/64** cells with lower CRC MAE; Wilcoxon *p* ≈ 0.85). We will **not** overclaim global MAE superiority over PIR.
+
+**Revision:** report **per-cell** significance, effect sizes, and uncertainty. We will also emphasize that CRC is evaluated with **NDR** and **validation-calibrated selective deployment**—metrics that our PIR runs do not report—so Table 3 alone does not capture the full comparison. Small effect sizes will be stated explicitly, consistent with your view that the remaining gaps are **reporting-related**, not conceptual.
 
 ---
 
-## Limitations
+**Limitations**
 
-We appreciate “None” on limitations; we will still expand validation–test mismatch and graph prior limitations in revision for other reviewers’ concerns.
+We appreciate your “None” on limitations; we will still expand validation–test mismatch and static graph priors in the revision (raised by other reviewers).
 
 Thank you again.
-
----
-
-## 内部备注
-
-- 实验 ID：**R14-E1**, **R14-E2** in `requirements.md` §4.2

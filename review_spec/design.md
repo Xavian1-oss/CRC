@@ -94,7 +94,9 @@ done
 |------|------|
 | `scripts/review/run_r1_experiments.sh` | G4 B1–B3 |
 | `scripts/review/run_g2_experiments.sh` | G2 B1–B3 |
-| `scripts/review/run_multi_seed.sh` | R14-E1 G5+G1 × 3 seeds |
+| `scripts/review/run_table_r1_unified.sh` | **Table R1** G1–G5 × B1–B3 (canonical) |
+| `scripts/review/verify_table_r1.py` | Claim checks → `table_r1_unified_verification.md` |
+| `scripts/review/run_multi_seed.sh` | R14-E1 G5+G1 × 3 seeds (B1) |
 | `scripts/review/run_topk_sweep.sh` | RMK-E1 top_k 3/5/7 |
 | `scripts/review/pir_crc_significance.py` | R14-E2 |
 | `scripts/review/summarize_review_logs.py` | 解析 `logs/review/*/run.log` |

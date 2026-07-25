@@ -1,8 +1,8 @@
 # CRC Rebuttal Experiment Results
 
-> **Status**: v0.3 — Table R1 **全员共享**（gnqC, vaUX, AC, MkCF）；G2/G4 新跑；G1/G3/G5 引用 spec  
-> **Logs**: `logs/review/g2_*`, `logs/review/g4_*`  
-> **Rebuttal 映射**: 见 `requirements.md` §1
+> **Status**: v0.4 — Table R1 **unified batch** (`logs/review/r1u_*`, `--fix_seed 2021`, 2026-07-24)  
+> **Verification**: `review_spec/table_r1_unified_verification.md`  
+> **Logs (canonical)**: `logs/review/r1u_g{1,2,3,4,5}_b{1,2,3}/`
 
 ### G0 / G1 / G5 与 vaUX「三选一更新」
 
@@ -21,20 +21,20 @@ Benchmarks: **B1** ETTh1+DLinear+96 · **B2** ETTh1+DLinear+336 · **B3** Weathe
 | Config | B1 MAE | B1 MSE | B1 NDR | B2 MAE | B2 MSE | B2 NDR | B3 MAE | B3 MSE | B3 NDR | Source |
 |--------|--------|--------|--------|--------|--------|--------|--------|--------|--------|--------|
 | **G0** Baseline | 0.4108 | 0.3962 | — | 0.4654 | 0.4874 | — | 0.2184 | 0.1685 | — | test log |
-| **G1** Always-on | 0.4701 | — | **10.1%** | 0.5741 | — | **15.2%** | 0.2337 | — | **33.1%** | spec A2 |
-| **G2** Ridge+val gate | 0.4097 | 0.3941 | **97.8%** | 0.4725 | 0.4959 | **94.8%** | 0.2112 | 0.1626 | **89.9%** | review g2 |
-| **G3** No dir gate | 0.4084 | — | 72.0% | 0.4729 | — | 61.2% | 0.2102 | — | 79.8% | spec A1 |
-| **G4** Deploy-only | 0.4097 | 0.3941 | 62.1% | 0.4592 | 0.4838 | 77.8% | **0.2081** | **0.1584** | 79.4% | review g4 |
-| **G5** Full CRC | **0.4102** | **0.3868** | 72.3% | **0.4723** | **0.4863** | 64.6% | **0.2110** | **0.1604** | 73.3% | spec legacy |
+| **G1** Always-on | 0.4738 | 0.4665 | **8.2%** | 0.5689 | 0.6328 | **10.6%** | 0.2326 | 0.1803 | **33.9%** | **r1u unified** |
+| **G2** Ridge+val gate | 0.4097 | 0.3941 | **97.9%** | 0.4693 | 0.4920 | **97.1%** | 0.2111 | 0.1626 | **90.0%** | **r1u unified** |
+| **G3** No dir gate | 0.4079 | 0.3865 | 81.8% | 0.4684 | 0.4786 | 78.5% | 0.2098 | 0.1611 | 81.5% | **r1u unified** |
+| **G4** Deploy-only | 0.4097 | 0.3941 | 62.1% | 0.4592 | 0.4838 | 77.8% | **0.2081** | **0.1584** | 79.4% | **r1u unified** |
+| **G5** Full CRC | **0.4084** | **0.3880** | **76.3%** | 0.4692 | **0.4812** | **77.7%** | 0.2103 | 0.1608 | **78.5%** | **r1u unified** |
 
 ### Key comparisons (R1 narrative)
 
 | Comparison | Finding |
 |------------|---------|
-| **G5 vs G1** | Always-on correction **collapses NDR** (10–33% vs 64–73%) and **hurts MAE** on all B1–B3 → selective deployment is essential, not “having a validation set”. |
-| **G5 vs G2** | Ridge+val gate achieves **very high NDR** (90–98%) but **smaller MAE/MSE gains**; B2 MAE even **worse than baseline** (−1.5%). Full CRC needed for **accuracy + calibrated safety**. |
-| **G5 vs G4** | Deploy-only (light encoder + blend) improves B3 MAE but **B1 NDR 62% < G5 72%** → representation (MTL/STCL/full priors) helps **both** accuracy and deployment quality. |
-| **G5 vs G3** | Removing dir gate drops B2 NDR **64.6%→61.2%** → direction gate is a **stabilizer**, not the core deployment rule. |
+| **G5 vs G1** | Always-on **collapses NDR** (8–34% vs 76–79%) and **hurts MAE** on B1–B3 → selective deployment essential. |
+| **G5 vs G2** | G2 **very high NDR** (90–98%) but **weaker B1 MSE** (0.3941 vs 0.3880); **B2 MAE** above baseline for both G2 and G5 (G2 more conservative). |
+| **G5 vs G4** | B1 NDR **76.3% vs 62.1%**; B3 MAE still **G4 best** (0.2081) — representation vs deploy-only trade-off. |
+| **G5 vs G3** | Direction gate **not uniformly better NDR** in unified batch (B2: 77.7% vs 78.5%); treat dir gate as **optional stabilizer**, not core deployment. |
 
 ---
 
@@ -43,10 +43,10 @@ Benchmarks: **B1** ETTh1+DLinear+96 · **B2** ETTh1+DLinear+336 · **B3** Weathe
 | Reviewer | 文稿 | 提交 |
 |----------|------|------|
 | gnqC | [x] `rebuttal_gnqC.md` | [ ] |
-| vaUX | [ ] `rebuttal_vaUX.md` | [ ] |
-| 14dv | [ ] `rebuttal_14dv.md` | [ ] |
-| MkCF | [ ] `rebuttal_MkCF.md` | [ ] |
-| AC | [ ] `rebuttal_AC.md` | [ ] |
+| vaUX | [x] `rebuttal_vaUX.md` | [ ] |
+| 14dv | [x] `rebuttal_14dv.md` | [ ] |
+| MkCF | [x] `rebuttal_MkCF.md` | [ ] |
+| AC | [x] `rebuttal_AC.md` | [ ] |
 
 ### 实验 backlog
 
@@ -70,8 +70,9 @@ Benchmarks: **B1** ETTh1+DLinear+96 · **B2** ETTh1+DLinear+336 · **B3** Weathe
 
 | Run | Path |
 |-----|------|
-| G2 B1–B3 | `logs/review/g2_b1/` … `g2_b3/` |
-| G4 B1–B3 | `logs/review/g4_b1/` … `g4_b3/` |
+| G2 B1–B3 | `logs/review/g2_b1/` … (superseded by **r1u_***) |
+| G4 B1–B3 | `logs/review/g4_b1/` … (superseded by **r1u_***) |
+| **Table R1 unified** | `logs/review/r1u_g{1,2,3,4,5}_b{1,2,3}/` |
 | R14-E1 | `logs/review/r14_g5_b1_seed*/`, `r14_g1_b1_seed*/` |
 | RMK-E1 | `logs/review/rmk_topk{3,5,7}_b1/` |
 

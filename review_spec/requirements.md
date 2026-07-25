@@ -17,7 +17,7 @@
 | **MkCF** | 4 | 局限/图/K | `rebuttal_MkCF.md` | P0 文字 + P1 K 敏感性 |
 | **AC asfz** | Meta | 新颖性/控制/理论 | `rebuttal_AC.md` | P0 相关 work + **引用 Table R1** |
 
-> 旧称「R1」= **gnqC**，非 OpenReview 序号。`rebuttal_r1.md` 为别名，内容同 `rebuttal_gnqC.md`。
+> 旧称「R1」= **gnqC**（OpenReview ID），非审稿序号 1。正文见 `rebuttal_gnqC.md`。
 
 ---
 
@@ -140,10 +140,10 @@ Rebuttal：承诺 revision 数字 + 若截止前可给 **1 个 dataset preview**
 
 - [x] Table R1 完成
 - [x] `rebuttal_gnqC.md` 定稿
-- [ ] `rebuttal_vaUX.md` 定稿（引用 G0/G1/G5）
-- [ ] `rebuttal_14dv.md` 定稿（承诺 + 可选 preview）
-- [ ] `rebuttal_MkCF.md` 定稿
-- [ ] `rebuttal_AC.md` 定稿（AC-Q1/Q2 + Meta）
+- [x] `rebuttal_vaUX.md` 定稿（引用 G0/G1/G5）
+- [x] `rebuttal_14dv.md` 定稿（承诺 + preview）
+- [x] `rebuttal_MkCF.md` 定稿
+- [x] `rebuttal_AC.md` 定稿（AC-Q1/Q2 + Meta）
 - [ ] OpenReview 五条回复粘贴完成
 
 ### Revision（会后）
