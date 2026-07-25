@@ -25,7 +25,7 @@ We will add **paired statistical analysis** across datasets and horizons (bootst
 
 **Rebuttal preview:** On **64 paired cells** from our internal CRC and PIR runs (matched dataset × backbone × horizon), aggregate Wilcoxon tests on MAE **do not** show CRC uniformly dominating PIR (**34/64** cells with lower CRC MAE; Wilcoxon *p* ≈ 0.85). We will **not** overclaim global MAE superiority over PIR.
 
-**Revision:** report **per-cell** significance, effect sizes, and uncertainty. We will also emphasize that CRC is evaluated with **NDR** and **validation-calibrated selective deployment**—metrics that our PIR runs do not report—so Table 3 alone does not capture the full comparison. Small effect sizes will be stated explicitly, consistent with your view that the remaining gaps are **reporting-related**, not conceptual.
+**Revision:** report **per-cell** significance, effect sizes, and uncertainty. **PIR adjusts revision magnitude after an update is accepted; CRC decides whether to deploy a candidate correction in the first place**, with **NDR** and validation-calibrated selective deployment—dimensions our PIR runs do not report—so Table 3 alone does not capture the full comparison. Small effect sizes will be stated explicitly, consistent with your view that the remaining gaps are **reporting-related**, not conceptual.
 
 ---
 

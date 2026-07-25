@@ -40,9 +40,9 @@ We agree this comparison is central. Summary of Table R1:
 
 **Takeaways:**
 
-1. **Validation alone is not enough.** G1 uses the same corrector and validation split but **without** per-(node,h) selection; NDR collapses and MAE degrades (B1 MAE **0.4738** vs. G5 **0.4084**).
+1. **Per-(node,h) deployment calibration is essential.** G1 keeps validation training but **disables blend grid search** (fixed full weights); NDR collapses and MAE degrades (B1 MAE **0.4738** vs. G5 **0.4084**). This is stronger than Table 2’s single-filter ablations—it isolates **always-on deployment** of the full corrector path.
 
-2. **G2 is safe but conservative (safety–capacity trade-off).** G2 yields **very high NDR** (90–98%) but **does not recover the accuracy gains of full selective deployment**: weaker B1 MSE than G5 (**0.3941** vs. **0.3880**); on B2, G2 MAE **0.4693** exceeds baseline **0.4654** (NDR **97.1%**). Full CRC targets **stronger MSE** with **moderate NDR (~76–79%)**.
+2. **High safety alone is insufficient (G2 vs. G5).** Ridge-only validation gating yields **very high NDR** (90–98%) but remains **conservative** and **does not recover the accuracy gains of the full deployment strategy**: weaker B1 MSE than G5 (**0.3941** vs. **0.3880**); on B2, G2 MAE **0.4693** exceeds baseline **0.4654** (NDR **97.1%**). Full CRC targets **balanced safety and accuracy**—**stronger MSE** with **moderate NDR (~76–79%)**.
 
 3. **Full CRC combines deployment and representation.** G4 lowers B1 NDR (**62.1%** vs. **76.3%**) even when B1 MAE matches G2.
 
@@ -74,7 +74,7 @@ We will add a “failure modes” paragraph with G2 on B2: NDR **97.1%** but MAE
 We will add a short *Practitioner’s guide*:
 
 - **MAE/MSE:** global average accuracy.
-- **NDR:** fraction of (horizon × variable) pairs where correction **does not worsen** local MAE vs. the backbone.
+- **NDR:** fraction of (horizon × variable) pairs where correction **does not worsen** local error vs. the backbone (**MAE at each unit**, ties count as non-degrading—same as §4.1).
 
 **High NDR does not imply maximum MAE reduction** (Table R1):
 
@@ -105,6 +105,6 @@ We will make validation–test mismatch **more prominent**, since the deployment
 
 **Summary**
 
-We hope Table R1 and the three-layer decomposition address your main questions. **G2** (same representation as G5, restricted deployment head) achieves high NDR but is **too conservative** to match Full CRC on MSE/accuracy. **G1** shows that selective deployment—not validation alone—is essential for NDR.
+We hope Table R1 and the three-layer decomposition address your main questions. **G2** (same representation as G5, restricted deployment head) achieves high NDR but is **too conservative** to match Full CRC on MSE/accuracy. **G1** shows that **per-unit deployment calibration**—not merely training a corrector on validation—is essential for NDR.
 
 Thank you again for the helpful feedback.
