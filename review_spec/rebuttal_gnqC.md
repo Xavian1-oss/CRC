@@ -19,9 +19,7 @@ We agree that the paper should separate the **core deployment mechanism** from s
 | **Stabilizers** | Direction gate; hard τ clipping | Reduces unsafe nonlinear updates |
 | **Representation** | MTL; STCL; multi-scale physics priors | Improves **how well** residuals are fit |
 
-**Evidence (Table R1):**
-
-- **G1 (always-on):** NDR **8.2% / 10.6% / 33.9%** (B1/B2/B3) vs. Full CRC **80.3% / 79.7% / 78.5%** — selective deployment is the main safety mechanism.
+- **G1 (always-deploy):** NDR **8.2% / 10.6% / 33.9%** (B1/B2/B3) vs. Full CRC **80.3% / 79.7% / 78.5%** — in these runs, selective deployment is the main safety mechanism.
 - **G3 (no direction gate):** effect is **setting-dependent** (B1 NDR **81.8%** vs. G5 **80.3%**; B2 **79.7%** vs. **78.5%**); we classify the direction gate as a **secondary stabilizer**, not the primary deployment rule.
 - **G4 (deploy-only):** B1 NDR **62.1%** vs. Full CRC **80.3%**; on B3 Full CRC achieves **best MAE/MSE** (**0.1903 / 0.1408** vs. G4 **0.2081 / 0.1584**) while G4 remains strong on NDR—representation mainly boosts **deployment quality** on B1, not uniformly on all metrics.
 
@@ -34,14 +32,12 @@ We agree this comparison is central. Summary of Table R1:
 | Method | Description | B1 NDR | B2 NDR | B3 NDR | B1 MAE |
 |--------|-------------|--------|--------|--------|--------|
 | G0 | Baseline only | — | — | — | 0.4108 |
-| **G1** | Always-on (no selection) | **8.2%** | **10.6%** | **33.9%** | 0.4738 |
-| **G2** | Ridge + val gate only* | **97.9%** | **97.1%** | **90.0%** | 0.4097 |
+| **G1** | Always-deploy (blend search off)* | **8.2%** | **10.6%** | **33.9%** | 0.4738 |
+| **G2** | Ridge + val gate only† | **97.9%** | **97.1%** | **90.0%** | 0.4097 |
 | G4 | Deploy-only encoder | 62.1% | 77.8% | 79.4% | 0.4097 |
 | **G5** | Full CRC | **80.3%** | **79.7%** | **78.5%** | **0.3914** |
 
-**Takeaways:**
-
-1. **Per-(node,h) deployment calibration is essential.** G1 keeps validation training but **disables blend grid search** (fixed full weights); NDR collapses and MAE degrades (B1 MAE **0.4738** vs. G5 **0.3914**). This is stronger than Table 2’s single-filter ablations—it isolates **always-on deployment** of the full corrector path.
+1. **Per-(node,h) deployment calibration** is the key factor explaining the NDR/MAE gap between G1 and G5 in Table R1. G1 keeps validation training but **disables blend grid search** (fixed full weights); NDR collapses and MAE degrades (B1 MAE **0.4738** vs. G5 **0.3914**). This is stronger than Table 2’s single-filter ablations—it isolates **always-deploy** behavior on the full corrector path.
 
 2. **High safety alone is insufficient (G2 vs. G5).** Ridge-only validation gating yields **very high NDR** (90–98%) but remains **conservative** and **does not recover the accuracy gains of the full deployment strategy**: weaker B1 MSE than G5 (**0.3941** vs. **0.3780**); on B2, G2 MAE **0.4693** exceeds baseline **0.4654** (NDR **97.1%**) while G5 MAE **0.4392** improves over G0. Full CRC targets **balanced safety and accuracy**—**stronger MSE** with **moderate NDR (~78–80%)**.
 
@@ -91,7 +87,7 @@ When is higher NDR preferred? Settings where **local non-degradation** matters (
 
 | Q | Answer |
 |---|--------|
-| **Q1** | Always-on vs. safety: **G1→G5**. **G2** (same Stage-A as G5, ridge-only gate): high NDR, **conservative**—weaker B1 MSE vs G5. Full CRC adds nonlinear + full blend for MSE/NDR balance. |
+| **Q1** | Always-deploy vs. selective: **G1→G5**. **G2** (same Stage-A as G5, ridge-only gate): high NDR, **conservative**—weaker B1 MSE vs G5. Full CRC adds nonlinear + full blend for MSE/NDR balance. |
 | **Q2** | See W5; G1/G2/G5 form a clear trade-off triangle. |
 | **Q3** | Limitations + recalibration + G2 conservative example on B2. |
 | **Q4** | Core = blend + τ + ridge; stabilizers = dir gate; representation = MTL/STCL/priors (**G4**). |
@@ -106,6 +102,6 @@ We will make validation–test mismatch **more prominent**, since the deployment
 
 **Summary**
 
-We hope Table R1 and the three-layer decomposition address your main questions. **G2** (same representation as G5, restricted deployment head) achieves high NDR but is **too conservative** to match Full CRC on MSE/accuracy. **G1** shows that **per-unit deployment calibration**—not merely training a corrector on validation—is essential for NDR.
+We hope Table R1 and the three-layer decomposition address your main questions. **G2** (same representation as G5, restricted deployment head) achieves high NDR but is **too conservative** to match Full CRC on MSE/accuracy. **G1** shows that **per-unit deployment calibration**—not merely training a corrector on validation—is what drives NDR in our ladder.
 
 Thank you again for the helpful feedback.

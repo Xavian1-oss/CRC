@@ -10,7 +10,7 @@ Thank you for the detailed review and for highlighting **when to deploy** as the
 
 We agree deployment rules are calibrated on validation and **may fail under distribution shift**. We will **expand Limitations** prominently.
 
-**Evidence:** Our validation-ratio sensitivity analysis (paper) shows reasonable stability under varying val fractions. Under mismatch, CRC tends toward **conservative gates**—high NDR but reduced MAE gain. From Table R1, **G2** (*same Stage-A as G5; ridge-only validation gate*) on B2: **97.1% NDR** but MAE **0.4693** vs. baseline **0.4654**.
+Our validation-ratio sensitivity analysis (paper) shows reasonable stability under varying val fractions. Under mismatch, CRC tends toward **conservative gates**—high NDR but reduced MAE gain. From Table R1, **G2** (*same Stage-A as G5; ridge-only validation gate*) on B2: **97.1% NDR** but MAE **0.4693** vs. baseline **0.4654**.
 
 **Recalibration (Q1):** When the deployment context changes, recalibrate by **retraining stage-2 only** (backbone frozen)—e.g., a new validation slice or a new τ quantile. **Frequency:** when the **operational validation window** changes (new season or month of held-out data), not on every test batch.
 

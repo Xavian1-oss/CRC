@@ -40,7 +40,7 @@ Benchmarks: **B1** ETTh1+DLinear+96 · **B2** ETTh1+DLinear+336 · **B3** Weathe
 
 | Comparison   | Finding                                                                                                                                                            |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **G5 vs G1** | Always-on **collapses NDR** (8–34% vs ~78–80%) and **hurts MAE** on B1–B3 → selective deployment essential.                                                        |
+| **G5 vs G1** | Always-deploy **collapses NDR** (8–34% vs ~78–80%) and **hurts MAE** on B1–B3 → selective deployment explains the observed gap in our ladder.                                                        |
 | **G5 vs G2** | G2 **very high NDR** (90–98%) but **weaker B1 MSE** (0.3941 vs **0.3780**); **B2** G2 MAE above baseline (**0.4693** vs G0 **0.4654**), G5 **below** (**0.4392**). |
 | **G5 vs G4** | B1 NDR **80.3% vs 62.1%**; on B3 Full CRC **best MAE/MSE** (**0.1903 / 0.1408**) vs G4 (**0.2081 / 0.1584**).                                                      |
 | **G5 vs G3** | Direction gate **setting-dependent** (B1 NDR: G3 **81.8%** vs G5 **80.3%**; B2: G5 **79.7%** vs G3 **78.5%**) → **optional stabilizer**, not core deployment.      |
@@ -115,7 +115,7 @@ B1 · ETTh1 + DLinear + pl=96 · `--fix_seed` ∈ {2021, 2022, 2023} · 脚本 `
 | **G1** Always-on | 0.4828 ± 0.0131     | 0.4936 ± 0.0378     | 7.2 ± 1.5%      | 0.4742 / 0.4763 / 0.4979      | [x]    |
 
 
-**Takeaway (14dv preview):** G5 MAE **0.3991 ± 0.0011** (very stable); NDR **79.3 ± 6.3%** across seeds—qualitatively aligned with Table R1 G5 (**0.3914**, **80.3%**). G1 stays **low NDR (~7%)** and **much worse MAE**; **G1 vs. G5 gap** unchanged in spirit.
+**Takeaway (14dv preview):** G5 MAE **0.3991 ± 0.0011** across seeds; NDR **79.3 ± 6.3%**—qualitatively aligned with Table R1 representative G5 (**0.3914**, **80.3%**). G1 stays **low NDR (~7%)** and **much worse MAE**; **G1 vs. G5 gap** unchanged in spirit.
 
 ---
 
