@@ -34,9 +34,9 @@ Prior lines mainly target adaptation, revision magnitude, or model selection. **
 
 | Line | Primary decision | CRC emphasis |
 |------|------------------|--------------|
-| TAFAS, PETSA, FAC | How/whether to adapt the backbone at test | Frozen backbone + validation-calibrated deployment of post-hoc corrections |
-| SOLID | Whether context shift warrants action | Per-(var,h) deployment from validation residuals + hybrid corrector |
-| PIR | Revision magnitude after an update is accepted | Whether (and how) to deploy correction paths; NDR as local-harm diagnostic |
+| TAFAS, PETSA, FAC | How/whether to adapt the forecasting model or prediction process at test time | Frozen backbone + validation-calibrated deployment of post-hoc corrections |
+| SOLID | Whether detected context shift should trigger adaptation | Per-(var,h) deployment from validation residuals + hybrid corrector |
+| PIR | Which forecast instances to revise (identification + post-hoc revision) | Whether a generated correction should be trusted and deployed at (var,h); NDR as local-harm diagnostic |
 | FFORMA / FFORMS | Which forecaster to ensemble | Which correction pathway within one frozen forecaster |
 
 CRC is **not merely a residual corrector**; it adds an explicit deployment decision layer **orthogonal to correction generation**—when and how residual corrections should be trusted and deployed. Per-(var,h) calibration and NDR expose local harm that global MSE hides.
@@ -45,7 +45,7 @@ CRC is **not merely a residual corrector**; it adds an explicit deployment decis
 
 We do not run TTA/FFORMA in rebuttal; we will discuss in revision and can add one frozen-backbone comparison if the AC recommends a protocol.
 
-**PIR (revision):** soften §4.3—PIR modulates revision strength; CRC calibrates **deployment** of residual corrections (per-(var,h) blend, ridge floor, NDR).
+**PIR (revision):** soften §4.3—PIR **identifies which forecasts to revise** and performs post-hoc revision; CRC targets a different step: **whether a generated residual correction should be trusted and deployed** at fine (var,h) granularity (blend, ridge floor, NDR).
 
 ---
 
