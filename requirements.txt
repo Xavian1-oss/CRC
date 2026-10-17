@@ -1,0 +1,10 @@
+# Install PyTorch separately for your CUDA/CPU: https://pytorch.org/get-started/locally/
+torch
+numpy
+pandas
+scikit-learn
+matplotlib
+tqdm
+einops
+psutil
+scipy
